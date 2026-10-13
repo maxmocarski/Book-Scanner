@@ -1,0 +1,15 @@
+services:
+  bookbridge:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8503:8503"
+    environment:
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      BOOKBRIDGE_MODEL: ${BOOKBRIDGE_MODEL:-gemma3:12b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - bookbridge-data:/data
+volumes:
+  bookbridge-data:
