@@ -6,16 +6,14 @@ import time
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-import main
-from scanning import Metadata, Scanner, ScanError, SecondPass, baseline
-from schema import initialize
-
+import api.main as main
+from core.scanning import Metadata, Scanner, ScanError, SecondPass, baseline
+from api.schema import initialize
 def test_isbn_ocr_repair_preserves_digits():
     m,notes,changes=baseline(Metadata(title='1984',author='Orwell',isbn='978O743273565'))
     assert m.isbn=='9780743273565' and m.title=='1984'
     assert any(c['field']=='isbn' for c in changes)
     m,_,_=baseline(Metadata(isbn='9780743273566'));assert m.isbn is None
-
 def test_secondary_cleanup_and_isbn_guard():
     scanner=Scanner(None);calls=[]
     async def generate(model,prompt,schema,images=None):
@@ -27,7 +25,6 @@ def test_secondary_cleanup_and_isbn_guard():
     assert calls[0][0]=='gemma3:1b' and calls[0][2] is None
     assert len([x for x in c if x['source']=='secondary_model'])==2
     assert suggestion is None and s==[] and any('ISBN change was not applied' in x for x in n)
-
 def test_lookup_suggestion_is_separate_and_grounded():
     scanner=Scanner(None)
     async def search(metadata):return [{'index':0,'url':'https://example.org/book','title':'The Great Gatsby — F. Scott Fitzgerald','content':'ISBN 9780743273565 Paperback'}],None
@@ -45,7 +42,6 @@ def test_lookup_suggestion_is_separate_and_grounded():
     scanner.generate=uncited
     *_,suggestion=asyncio.run(scanner.enrich(Metadata(title='The Great Gatsby'),'lookup'))
     assert suggestion['metadata']['isbn'] is None
-
 def test_lookup_and_secondary_failures_keep_original():
     scanner=Scanner(None)
     async def search(metadata):return [],'Lookup unavailable; continuing with cleanup.'
@@ -54,7 +50,6 @@ def test_lookup_and_secondary_failures_keep_original():
     m,n,c,s,suggestion=asyncio.run(scanner.enrich(Metadata(title='1984',author='George Orwell'),'lookup'))
     assert m.title=='1984' and m.author=='George Orwell'
     assert any('Secondary model unavailable' in x for x in n) and any('Lookup unavailable' in x for x in n)
-
 def test_ollama_and_searxng_payloads(monkeypatch):
     scanner=Scanner(None);seen=[]
     async def post(self,url,json):
@@ -72,19 +67,16 @@ def test_ollama_and_searxng_payloads(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient,'post',post);monkeypatch.setattr(httpx.AsyncClient,'get',get)
     async def pipeline():return await scanner.enrich(await scanner.identify([b'front',b'spine',b'back']),'lookup')
     m,n,c,s,suggestion=asyncio.run(pipeline());assert m.title=='The Great Gatsby' and len(seen)==2 and len(s)==1
-
 def test_searxng_json_disabled_fallback(monkeypatch):
     scanner=Scanner(None)
     async def get(self,url,params):return httpx.Response(403,request=httpx.Request('GET',url))
     monkeypatch.setattr(httpx.AsyncClient,'get',get)
     s,w=asyncio.run(scanner.search(Metadata(title='Some Book')));assert s==[] and 'search.formats includes json' in w
-
 def test_bad_ollama_reply(monkeypatch):
     scanner=Scanner(None)
     async def post(self,url,json):return httpx.Response(200,json={'response':'not json'},request=httpx.Request('POST',url))
     monkeypatch.setattr(httpx.AsyncClient,'post',post)
     with pytest.raises(ScanError):asyncio.run(scanner.identify([b'image']))
-
 def test_migrate_existing_books_and_drafts(tmp_path):
     path=tmp_path/'old.sqlite3';conn=sqlite3.connect(path)
     conn.executescript('''
@@ -112,7 +104,6 @@ def test_migrate_existing_books_and_drafts(tmp_path):
         assert c.execute('SELECT image FROM scan_images').fetchone()[0]==b'draft image'
         assert not c.execute('PRAGMA foreign_key_check').fetchall()
         assert not c.execute("SELECT 1 FROM sqlite_master WHERE name='drafts'").fetchone()
-
 def test_live_background_worker_with_mocked_models(tmp_path,monkeypatch):
     monkeypatch.setattr(main,'DATA',tmp_path);monkeypatch.setattr(main.app.state,'worker_enabled',True,raising=False)
     async def identify(self,images):return Metadata(title='Book',author='Author')
