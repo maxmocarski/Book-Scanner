@@ -1,42 +1,112 @@
-# BookBridge — private book catalog and swaps
+# BookBridge 0.2 — queued book scans and private swaps
 
-A backend inspired by Max Mocarski's [ReVolt](https://github.com/maxmocarski/Revolt). It reuses the same approach: FastAPI sends camera photos to a self-hosted Gemma vision model through Ollama. This is a separate implementation and does not modify ReVolt.
+A FastAPI backend inspired by Max Mocarski's [ReVolt](https://github.com/maxmocarski/Revolt). Catalog your physical books using a self-hosted Gemma camera scan, then arrange book-for-book swaps with invited friends. This project is separate from ReVolt.
 
-## Included
+## Scan pipeline
 
-- Register/login with hashed passwords and expiring bearer sessions.
-- Photograph **one physical book per scan**. Upload its cover plus an optional back/copyright-page photo for the ISBN.
-- Gemma extracts visible title, author and ISBN into a review draft. It is instructed to leave missing fields null. AI may still misread or invent text: always review.
-- ISBN-10 and ISBN-13 checksum validation. This validates syntax, not whether the ISBN belongs to this edition. No external metadata verification or barcode decoder yet.
-- Confirm/correct metadata before saving. Each physical copy has its own ID, even if two copies share an ISBN.
-- Persist **one** normalized JPEG with each saved book in SQLite. The detail photo is never persisted. EXIF metadata is stripped. Drafts expire after 24 hours.
-- Private collections. Accepted friends can see each other's entire collection and photos; only books marked available may be traded. New books default to unavailable.
-- Single-use, 24-hour invitation codes; share them yourself with people you know. No public user directory or automatic messages.
-- One-for-one swaps: propose → recipient accepts → both confirm physical handoff → ownership transfers atomically. Books are reserved on acceptance; competing proposals are cancelled.
-- Either person can cancel before completion. Removing friendship cancels pending/accepted swaps and removes photo access.
-- Interactive API docs at `/docs`. **No camera frontend or mobile app is included yet.**
+1. Upload **one physical book**, with a required `front` photo and optional `spine` and `back` photos. Up to three images, 10 MB each. For the ISBN, `back` can instead be a copyright-page photo.
+2. The upload returns **HTTP 202** and a persistent queue ID immediately after image validation/storage. Submit another book without waiting for AI. Each book is one job; multiple books need multiple submissions.
+3. A single worker takes jobs in FIFO order, sends all the book's photos together to `gemma3:12b`, and extracts title, author and ISBN.
+4. A lighter, **text-only** `gemma3:1b` pass cleans obvious OCR/spelling/punctuation mistakes. Optional lookup mode first queries your SearXNG instance and supplies search snippets to the lighter model.
+5. Poll for completion, review the result and its changes, and save the book. **All uploaded photos are kept** with the saved book.
 
-## Start on your existing Ollama server
+The model passes run serially; other books wait in the queue. Normalized JPEG photos and jobs live in SQLite, not process memory. Interrupted jobs requeue on restart. Failed primary scans keep their photos and can be retried; a secondary/search failure leaves the primary result ready with a warning. Cancelling removes the job/photos immediately; an in-flight model request may still finish, but cannot recreate the deleted job.
 
-Python 3.12 is recommended. Gemma runs on the server, not on the phone.
+Statuses: `queued` → `identifying` → `enriching` → `ready`, or `failed`. `queue_position` is the waiting position: 1 means next in line and excludes the currently running book. It is null for jobs already processing/finished. Retry places a failed book at the back of the waiting queue.
+
+## Corrections and ISBNs
+
+The result includes `metadata`, `original_metadata`, a `corrections` list with before/after values, warnings, source URLs/snippets, and an optional `lookup_suggestion`.
+
+- ISBNs read with common OCR mistakes such as `O` for `0`, or `I`/`l`/`|` for `1`, can be repaired **only when the resulting number passes ISBN-10/ISBN-13 validation**. No digit padding or invented check digits.
+- The lighter model can make small title/author edits, such as `F. Sc0tt Fitzgerald` → `F. Scott Fitzgerald`. Large rewrites are rejected. Names and deliberate title spelling may still be miscorrected; the original and applied edits remain visible.
+- A secondary-model ISBN cannot replace a valid photographed ISBN. Missing/invalid photographed ISBNs stay null unless deterministic character repair succeeds.
+- Lookup metadata stays in a **separate suggestion**. Suggested fields must occur in cited snippets, and suggested ISBNs must pass checksum validation. Snippets can still describe the wrong book or edition; suggestions are explicitly unverified. Choose/correct fields yourself in the save request.
+- ISBN checksum validation proves syntax, not book identity or edition. ISBNs are optional at save time. Title and author require user input if unreadable.
+
+This is OCR cleanup, not a guarantee of bibliographic accuracy. No barcode decoder or dedicated catalog API is included yet.
+
+## Deploy on guzdekai
+
+The included `compose.yaml` is configured for your existing containers:
+
+- External Docker network: `revolt_default`
+- Ollama: `http://ollama:11434`
+- SearXNG: `http://searxng:8080`
+- BookBridge: host `127.0.0.1:8503`
+
+Upload the **contents** of the `bookbridge` folder into the top level of your GitHub repository. Include `main.py`, `scanning.py`, `schema.py`, `Dockerfile`, `compose.yaml`, requirements and tests. Upload the extracted files, not the ZIP. Do not upload a virtual environment, private `.env`, or database/data folder. This project has not been pushed to GitHub automatically.
+
+On the server, for a new clone (assuming that repo name):
 
 ```bash
-cd bookbridge
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-ollama pull gemma3:12b
-OLLAMA_HOST=http://127.0.0.1:11434 BOOKBRIDGE_DATA=./data \
-  .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8503
+git clone https://github.com/maxmocarski/BookBridge.git ~/bookbridge
+cd ~/bookbridge
+sudo docker exec ollama ollama pull gemma3:12b
+sudo docker exec ollama ollama pull gemma3:1b
+sudo docker compose up -d --build
+curl http://127.0.0.1:8503/health
 ```
 
-Open `http://127.0.0.1:8503/docs`. The service uses 8503 so ReVolt can remain on 8502. To use another existing vision model, set `BOOKBRIDGE_MODEL`. Ollama must have that model installed. No Ollama server/model is bundled with the download.
+If already cloned, use `git pull` instead of cloning again. If you already deployed 0.1, back up the existing data before updating (see migration below).
 
-## Try the complete flow in API docs
+The default mode is `cleanup`. To use SearXNG lookup for all new scans, create/edit a local `.env` alongside `compose.yaml`:
 
-1. Call `POST /auth/register` with a username and a password of at least 12 characters.
-2. Copy `access_token`. Click **Authorize**, enter the token, and authorize. Keep the token private.
-3. Call `POST /scans` with a `cover` photo. Optionally include `details` with the ISBN page/back. A cold Gemma model can take a while.
-4. Copy `scan_id`, then call `POST /scans/{scan_id}/save` with the reviewed fields:
+```dotenv
+BOOKBRIDGE_ENRICHMENT=lookup
+```
+
+Then apply it:
+
+```bash
+sudo docker compose up -d --build
+```
+
+Each submission can override that default with multipart `enrichment=cleanup`, `lookup`, or `off`. The mode is stored with the queued job. Search queries contain only ISBN or title/author; photos are sent to Ollama only. Lookup queries are forwarded by SearXNG to external search engines. Cleanup/off modes do not search the web.
+
+### Enable JSON in SearXNG
+
+Lookup uses `GET /search?q=...&format=json`. Your SearXNG settings must permit JSON. In the **existing** `settings.yml`, under its existing `search:` block, include:
+
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+Merge these entries into existing settings instead of replacing the file or adding a second `search:` key. Restart SearXNG after changing its mounted configuration. If you need to locate the host config:
+
+```bash
+sudo docker inspect searxng --format '{{json .Mounts}}'
+```
+
+Test lookup access **from the BookBridge container**:
+
+```bash
+sudo docker exec bookbridge python -c "import httpx; r=httpx.get('http://searxng:8080/search', params={'q':'The Great Gatsby F. Scott Fitzgerald','format':'json'}, timeout=30, trust_env=False); print('HTTP',r.status_code); print(r.text[:500])"
+```
+
+A 403 often means JSON is disabled. Search results can also be unavailable because of engine/network errors. The app falls back to text cleanup and shows a warning. The included configuration assumes SearXNG shares `revolt_default`; inspect its networks if connection/DNS fails.
+
+### Reach the API from your computer
+
+For initial testing, keep port 8503 private and use an SSH tunnel from Windows PowerShell:
+
+```powershell
+ssh -L 8503:127.0.0.1:8503 mmocarski1@guzdekai
+```
+
+Leave that SSH session open, then visit `http://localhost:8503/docs`. Substitute the server's IP if its name does not resolve. A future phone-camera frontend needs HTTPS; it is not included in this backend.
+
+## Test scans using interactive docs
+
+1. `POST /auth/register` with a username and password of at least 12 characters. Copy the returned `access_token`.
+2. Click **Authorize** and enter the token. All scan/book/photo/friend/trade endpoints require bearer authentication.
+3. Submit `POST /scans` with `front`, optional `spine`, optional `back`, and an optional enrichment mode. **Omit unused file fields**; do not attach empty files. Legacy `cover` (front) and `details` (back) are accepted, but cannot be combined with the equivalent new field.
+4. Copy `scan_id` and submit the next book if desired. Use `GET /scans` for your queue or `GET /scans/{scan_id}` for one job. A frontend should poll every 1–2 seconds while the status is queued/identifying/enriching.
+5. When status becomes `ready`, inspect `original_metadata`, `metadata`, `corrections`, `warnings`, and any lookup suggestion. `GET /scans/{scan_id}/images/{position}` lets you view the retained photos.
+6. Submit `POST /scans/{scan_id}/save` with the fields you have reviewed. For example:
 
 ```json
 {
@@ -47,81 +117,98 @@ Open `http://127.0.0.1:8503/docs`. The service uses 8503 so ReVolt can remain on
 }
 ```
 
-If the book has no readable ISBN, send `null`. Title and author require user input if Gemma cannot read them. Saving consumes the draft; repeating save cannot add a duplicate copy accidentally.
+The save response includes `book_id`; saving consumes the queued result and moves all its photos to the book **atomically**. Repeating save cannot add a duplicate accidentally. Distinct physical copies may share an ISBN and still have separate book IDs.
 
-5. `GET /books` lists your books and their IDs. Photo endpoints require the same bearer token. A frontend should fetch photos with an Authorization header and render a Blob URL; a plain unauthenticated `<img src>` will not work.
-6. Create an invitation with `POST /friends/invites`. Have your friend create their own account and submit the code to `POST /friends/accept`.
-7. `GET /friends` shows friend IDs; `GET /books?owner_id=FRIEND_ID` shows that friend's collection.
-8. Each person adds an available book. `POST /trades` with `wanted_book_id` (the friend's copy) and `offered_book_id` (your copy) creates a proposal.
-9. The friend calls `/trades/{trade_id}/accept`. After exchanging the physical books, **each** person calls `/trades/{trade_id}/confirm-handoff`. The second confirmation transfers both copies and marks them unavailable in their new owners' collections.
+7. `GET /books` returns your catalog with an `images` array (view, position and URL). Position reflects uploaded order, not a fixed role: front+back produces positions 0 and 1. Use the `view` field to distinguish photos. `/books/{id}/image` remains a front-photo alias for compatibility.
+8. Failed jobs can be retried with `POST /scans/{id}/retry`, or cancelled using `DELETE /scans/{id}`. Cancellation also works for queued, processing, and ready jobs.
 
-Use `PATCH /books/{book_id}` to replace metadata/availability; include title and author. Use `/trades/{trade_id}/cancel` to decline/cancel. Books with trade history cannot currently be deleted; mark them unavailable instead. This preserves the trade record.
+Image URLs require Authorization. A frontend should fetch each photo with a bearer header and display its Blob URL; a plain unauthenticated `<img src>` will not work.
 
-## Docker
+## Friends and physical swaps
+
+Your collection is private until you accept friendship. Friends can see your **whole collection and all its photos**; only books marked available can be traded. New books default to unavailable.
+
+- `POST /friends/invites` creates a single-use, 24-hour code. Share it privately yourself; the backend sends no messages.
+- Your friend registers, signs in, and submits it to `POST /friends/accept`.
+- `GET /friends` shows friend IDs; `GET /books?owner_id=FRIEND_ID` lists a friend's catalog.
+- Each person adds an available book. `POST /trades` takes `wanted_book_id` (their copy) and `offered_book_id` (your copy).
+- The recipient accepts via `/trades/{id}/accept`. Both books become reserved and competing proposals are cancelled.
+- After physically exchanging the books, **each person** calls `/trades/{id}/confirm-handoff`. The second confirmation transfers both book records **including all photos**, then marks both copies unavailable in their new owners' catalogs.
+- Either person can decline/cancel via `/trades/{id}/cancel`. Removing friendship cancels open trades and removes photo access.
+
+`PATCH /books/{id}` replaces metadata and availability; include title and author. Books with trade history cannot currently be deleted: mark them unavailable instead. Book images and their original scan audit are preserved during edits.
+
+## Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OLLAMA_HOST` | `http://localhost:11434` locally; `http://ollama:11434` in Compose | Ollama URL |
+| `BOOKBRIDGE_MODEL` | `gemma3:12b` | Primary vision model |
+| `BOOKBRIDGE_TEXT_MODEL` | `gemma3:1b` | Lighter text-only second pass |
+| `BOOKBRIDGE_ENRICHMENT` | `cleanup` | Default `cleanup`, `lookup`, or `off` |
+| `SEARXNG_URL` | `http://searxng:8080` | Search endpoint for lookup mode |
+| `BOOKBRIDGE_KEEP_ALIVE` | `0` | Unload each model after inference; use `5m` if both models fit comfortably |
+| `BOOKBRIDGE_MODEL_TIMEOUT` | `180` | Timeout in seconds per model pass |
+| `BOOKBRIDGE_MAX_PENDING_PER_USER` | `100` | Maximum queued/processing jobs per user |
+| `BOOKBRIDGE_MAX_PENDING` | `500` | Maximum queued/processing jobs server-wide |
+| `BOOKBRIDGE_DATA` | `./data` locally; `/data` in Docker | Persistent SQLite data directory |
+
+Compose directly exposes the model/mode/keep-alive variables. Add the others to its `environment:` block if changing them. Timeout excludes waiting in the queue. Default unloading reduces pressure when both models cannot fit in memory but adds reload latency for each book. No Ollama model weights are bundled.
+
+## Run without Docker
+
+Linux/Unix, Python 3.12 recommended. The single-worker lock uses `fcntl`; use Docker/WSL on Windows.
 
 ```bash
-docker compose up -d --build
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+ollama pull gemma3:12b
+ollama pull gemma3:1b
+OLLAMA_HOST=http://127.0.0.1:11434 BOOKBRIDGE_DATA=./data \
+  .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8503
 ```
 
-The named volume persists the database and photos. Ollama must be reachable **from inside the container**. The default `host.docker.internal:11434` only works if the host Ollama listener is reachable on the Docker host gateway; a listener bound solely to host `127.0.0.1` is not reachable there.
+Use **one worker**. The data-directory lock prevents multiple processes from claiming/migrating the same queue. One shared scanner handles both model passes; no Redis/Celery service is required.
 
-For your existing Docker Ollama setup, put BookBridge on the same Docker network and set `OLLAMA_HOST=http://ollama:11434`. For example, add this service to the compose stack containing Ollama, adjusting its build path:
+## Existing data and migration
 
-```yaml
-  bookbridge:
-    build: ./bookbridge
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8503:8503"
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-      BOOKBRIDGE_MODEL: gemma3:12b
-    volumes:
-      - bookbridge-data:/data
+On startup, 0.1 data is migrated in one transaction: saved books become one-front-photo records, unexpired old drafts become ready scan results, and accounts/friends/trades stay intact. Migration is idempotent. The old image column/drafts table are removed after copying, so **do not run the old application against the migrated database**.
+
+Before upgrading an already deployed 0.1 instance, stop it and copy its data out:
+
+```bash
+sudo docker compose stop bookbridge
+sudo docker cp bookbridge:/data ./bookbridge-data-backup-before-v02
 ```
 
-Also declare `bookbridge-data:` under that stack's top-level `volumes`. Both services must share a network. Do not expose Ollama publicly to make this work.
+Keep the backup outside your Git repository. Update code, then rebuild/start using the same Compose project/data volume. If reverting to 0.1, restore that pre-upgrade backup too. Do not delete the named data volume when updating. If you originally deployed BookBridge inside a different stack, reuse its existing volume explicitly rather than accidentally creating a new empty one.
 
-## Storage and privacy
+Ready/failed scan results and their unsaved photos expire 24 hours **after processing finishes**, with cleanup approximately every minute and at startup. Waiting/in-flight jobs do not expire while processing; cancel them to free storage. Saving transfers photos to the catalog; discarding/deleting a result cascades removal of its photo rows. Persistent deleted SQLite pages/backups are not secure-erased automatically.
 
-The server saves accounts, friendships, book images and metadata, and trade records in `BOOKBRIDGE_DATA/bookbridge.sqlite3`. Unlike ReVolt's phone-local scan history, this catalog lives on the server so ownership and trades can be shared across accounts/devices. Back up the entire data directory while the app is stopped. Named-volume data survives ordinary Docker restarts; deleting the volume deletes the catalog.
-
-Draft images are deleted when saved/discarded or during expiry cleanup. External catalog services are not contacted. Invitation codes and bearer tokens are stored as hashes. Passwords use salted scrypt. Logout revokes the current token; sessions last seven days.
-
-## Limits of this first version
-
-Designed for a small trusted group behind private HTTPS access, such as your existing Tailscale setup. Use one Uvicorn worker. It is not ready for unrestricted public registration: no rate limiting, registration allowlist, email verification, password reset, account deletion/export, storage quotas, or account administration. API docs are development tools, not an end-user UI. For a future browser camera frontend, serve it through HTTPS and avoid putting access tokens in URLs.
-
-The model can only use visible evidence; an ISBN often requires a second photo. Checksum validation cannot prove edition accuracy. Live Gemma recognition depends on your server hardware and model; automated tests mock it. No live server/GPU test was performed here. Docker configuration is provided but has not been launched here.
-
-SQLite serializes swap updates to prevent two accepted trades reserving the same copy. Images are stored as BLOBs for a simple atomic save; large deployments should use private object storage and a larger database. Lending, multi-book swaps, messaging, shelf batch scanning, barcode decoding, metadata lookup, and automatic valuation are not implemented.
-
-## Tests
+## Tests and current scope
 
 ```bash
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest -q
 ```
 
-Tests cover photo privacy, scan/save, invalid uploads, ISBN checks, authentication, invite consumption, friend removal, swap authorization, reservations, both-party confirmation, and Ollama request structure using mocked inference.
+Tests cover queue ordering/limits, submitting while inference waits, cancellation in flight, retries/recovery, three-photo access/privacy, existing-data migration, authentication, friendship/trade reservations, both-party handoff, OCR character repair, second-pass corrections, lookup suggestions, and unavailable/invalid services. AI and search calls are mocked; no live GPU/Gemma/SearXNG or Docker deployment has been performed here.
 
-## API reference
+This is an API backend, not a camera frontend. It is designed for a small trusted group behind private access such as your Tailscale network. Accounts use salted scrypt, hashed bearer sessions (seven days), and logout revocation. Public deployment still needs registration controls, rate limiting, account recovery/administration, storage quotas, and HTTPS. Total retained catalog storage has no quota yet. A production proxy should limit upload request size too. No lending, messaging, multi-book swaps, shelf-batch detection, or automatic valuation is included.
 
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/auth/register`, `/auth/login`, `/auth/logout` | Account/session lifecycle |
-| GET | `/me` | Current user ID and username |
-| POST | `/scans` | Review draft from cover + optional details |
-| POST | `/scans/{id}/save` | Save reviewed book and one photo |
-| DELETE | `/scans/{id}` | Discard draft |
-| GET | `/books` | Own collection, or friend's via owner_id |
-| GET | `/books/{id}/image` | Authenticated JPEG |
-| PATCH / DELETE | `/books/{id}` | Edit / remove eligible own book |
-| POST | `/friends/invites`, `/friends/accept` | Invite and consent to friendship |
-| GET | `/friends` | Accepted friends |
-| DELETE | `/friends/{id}` | End friendship and cancel open swaps |
-| POST / GET | `/trades` | Propose / list own swaps |
-| POST | `/trades/{id}/accept` | Recipient reserves both books |
-| POST | `/trades/{id}/cancel` | Either party declines/cancels |
-| POST | `/trades/{id}/confirm-handoff` | Confirm physical exchange |
-| GET | `/health` | Service liveness (does not probe Gemma) |
+## Source layout
+
+| File | Purpose |
+|---|---|
+| `main.py` | Authenticated API, catalog, friendship and swaps |
+| `scanning.py` | Queue worker, image normalization, both models, SearXNG and correction safeguards |
+| `schema.py` | Tables and migration from 0.1 |
+| `compose.yaml`, `Dockerfile` | Deployment on the existing server/network |
+| `.env.example` | Optional model/mode configuration |
+| `tests/` | Regression tests using mocked services |
+
+## References
+
+- [Ollama Gemma 3 models](https://ollama.com/library/gemma3): 12B vision model and 1B text model.
+- [Ollama Generate API](https://docs.ollama.com/api/generate): images, JSON schema output and keep-alive configuration.
+- [SearXNG Search API](https://docs.searxng.org/dev/search_api.html): JSON search requests and permitted formats.

@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py .
+COPY main.py scanning.py schema.py ./
 RUN useradd --system --uid 10001 bookbridge && mkdir /data && chown bookbridge /data
 USER bookbridge
 ENV BOOKBRIDGE_DATA=/data
