@@ -1,6 +1,45 @@
-# BookBridge 0.2 — queued book scans and private swaps
+# BookBridge 0.3 — camera scanner, private library and swaps
 
 A FastAPI backend inspired by Max Mocarski's [ReVolt](https://github.com/maxmocarski/Revolt). Catalog your physical books using a self-hosted Gemma camera scan, then arrange book-for-book swaps with invited friends. This project is separate from ReVolt.
+
+## Simple web interface
+
+Open `/` for the app. It has four sections: **Scan a book**, **Queue**, **My library**, and **Friends & trades**. A responsive cream/dark-green design uses a ReVolt-style camera viewport and shutter, with three photo slots and a simple review dialog.
+
+Sign in or register in the app. Authentication is handled automatically; you do not copy tokens or scan IDs. The session is stored in this browser tab and cleared on sign-out. Photos require authenticated requests and are displayed as local Blob URLs. All fonts, icons and assets are served by the app, with no frontend framework/build step or external CDN.
+
+- Open the camera or upload JPG/PNG/WebP images into front, spine and back slots. Preview/remove photos before submitting. Front is required; the other two are optional.
+- Queue scans without waiting for AI. The queue updates automatically every 2.5 seconds while the tab is visible.
+- Review fields, OCR corrections, warnings and lookup suggestions, then save. ISBN is optional.
+- Search your library, edit details/availability, or browse an invited friend's library.
+- Create/copy an invitation code, accept one, request a one-for-one swap, accept/decline it, and confirm physical handoff. Both people must confirm before ownership transfers.
+
+Camera permissions require **HTTPS or localhost**. If opening the app via a plain HTTP server IP, upload photos instead, or use a private HTTPS setup. The desktop SSH tunnel below uses localhost and supports camera access. Closing/changing tabs within the app stops the camera; backgrounding the browser also stops it. No service worker/offline cache is added.
+
+## Update the deployed server
+
+Upload the files from this release into the top level of your **Book-Scanner** GitHub repository, preserving the `static/` folder. Update `main.py`, `Dockerfile`, `README.md` and the new static files; include the supplied ignore files. Your server's active Compose file is still **`~/revolt/docker-compose.yml`** and its BookBridge service uses `build: ../bookbridge`, port 8503 and `../bookbridge/data:/data`. Keep that server configuration.
+
+```bash
+cd ~/bookbridge
+git pull
+cd ~/revolt
+sudo docker compose up -d --build --no-deps bookbridge
+```
+
+This rebuilds only BookBridge and preserves the existing data folder. ReVolt remains a separate running service on 8502. No database migration is required for the frontend update. The new trade-list response adds book titles/usernames while preserving existing API fields.
+
+From Windows PowerShell:
+
+```powershell
+ssh -L 8503:127.0.0.1:8503 mmocarski1@guzdekai
+```
+
+Keep the session open, then visit **http://localhost:8503/** (the app), rather than `/docs` (developer API controls). Existing accounts and saved books are available after sign-in.
+
+## Validation for this release
+
+19 backend tests passed, including frontend serving and trade labels. The Playwright browser flow passed at desktop and 390 px phone width: sign-up/sign-in, camera capture, three photos, scan/review/save/edit, invitation creation, browsing a friend’s books, swap request/acceptance, both-party handoff, transfer of all photos, and logout revocation. Browser runs use a temporary database and mocked inference/search responses.
 
 ## Scan pipeline
 
@@ -40,7 +79,7 @@ Upload the **contents** of the `bookbridge` folder into the top level of your Gi
 On the server, for a new clone (assuming that repo name):
 
 ```bash
-git clone https://github.com/maxmocarski/BookBridge.git ~/bookbridge
+git clone https://github.com/maxmocarski/Book-Scanner.git ~/bookbridge
 cd ~/bookbridge
 sudo docker exec ollama ollama pull gemma3:12b
 sudo docker exec ollama ollama pull gemma3:1b
@@ -97,7 +136,7 @@ For initial testing, keep port 8503 private and use an SSH tunnel from Windows P
 ssh -L 8503:127.0.0.1:8503 mmocarski1@guzdekai
 ```
 
-Leave that SSH session open, then visit `http://localhost:8503/docs`. Substitute the server's IP if its name does not resolve. A future phone-camera frontend needs HTTPS; it is not included in this backend.
+Leave that SSH session open, then visit `http://localhost:8503/docs`. Substitute the server's IP if its name does not resolve. Phone camera access requires private HTTPS; the desktop localhost tunnel supports camera access.
 
 ## Test scans using interactive docs
 
@@ -194,18 +233,35 @@ Ready/failed scan results and their unsaved photos expire 24 hours **after proce
 
 Tests cover queue ordering/limits, submitting while inference waits, cancellation in flight, retries/recovery, three-photo access/privacy, existing-data migration, authentication, friendship/trade reservations, both-party handoff, OCR character repair, second-pass corrections, lookup suggestions, and unavailable/invalid services. AI and search calls are mocked; no live GPU/Gemma/SearXNG or Docker deployment has been performed here.
 
-This is an API backend, not a camera frontend. It is designed for a small trusted group behind private access such as your Tailscale network. Accounts use salted scrypt, hashed bearer sessions (seven days), and logout revocation. Public deployment still needs registration controls, rate limiting, account recovery/administration, storage quotas, and HTTPS. Total retained catalog storage has no quota yet. A production proxy should limit upload request size too. No lending, messaging, multi-book swaps, shelf-batch detection, or automatic valuation is included.
+The frontend and API are served by the same FastAPI app. It is designed for a small trusted group behind private access such as your Tailscale network. Accounts use salted scrypt, hashed bearer sessions (seven days), and logout revocation. Public deployment still needs registration controls, rate limiting, account recovery/administration, storage quotas, and HTTPS. Total retained catalog storage has no quota yet. A production proxy should limit upload request size too. No lending, messaging, multi-book swaps, shelf-batch detection, or automatic valuation is included.
 
 ## Source layout
 
 | File | Purpose |
 |---|---|
-| `main.py` | Authenticated API, catalog, friendship and swaps |
+| `main.py` | Authenticated API, frontend serving, catalog, friendship and swaps |
+| `static/` | Responsive HTML, CSS, JavaScript and book icon |
 | `scanning.py` | Queue worker, image normalization, both models, SearXNG and correction safeguards |
 | `schema.py` | Tables and migration from 0.1 |
 | `compose.yaml`, `Dockerfile` | Deployment on the existing server/network |
 | `.env.example` | Optional model/mode configuration |
 | `tests/` | Regression tests using mocked services |
+
+## Browser regression checks
+
+Use the disposable mocked-model test server, **not your live library**. The browser check creates test users, scans and trades, and checks camera capture, three-photo upload, OCR review, saving/editing, invitations, ownership transfer, sign-out revocation, and phone-width layout.
+
+```bash
+# Terminal 1: temporary database, fake model/search replies
+.venv/bin/python tests/ui/mock_server.py
+
+# Terminal 2: Node + Playwright (development only)
+npm install --no-save playwright
+npx playwright install chromium
+node tests/ui/run.cjs
+```
+
+`BOOKBRIDGE_CHROMIUM` can point to an installed Chromium executable. Browser screenshots are written to `/tmp/bookbridge-ui-check` by default; override with `BOOKBRIDGE_UI_SCREENSHOTS`. Tests use a synthetic book image and mocked inference; they do not establish real camera recognition accuracy or live server connectivity.
 
 ## References
 

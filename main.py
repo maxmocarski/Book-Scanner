@@ -12,7 +12,8 @@ import sqlite3
 import time
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import UploadFile as FormUploadFile
@@ -75,8 +76,15 @@ async def expiry_loop():
         await asyncio.sleep(60)
         await asyncio.to_thread(cleanup_expired)
 
-app = FastAPI(title='BookBridge', version='0.2.0', lifespan=lifespan,
+app = FastAPI(title='BookBridge', version='0.3.0', lifespan=lifespan,
               description='Private books, durable scan queue, up to three photos, Gemma + text enrichment, and friend swaps. Photos require Bearer authentication.')
+STATIC = Path(__file__).parent / 'static'
+app.mount('/static', StaticFiles(directory=STATIC), name='static')
+
+@app.get('/', include_in_schema=False)
+def home():
+    return FileResponse(STATIC / 'index.html', headers={'Cache-Control': 'no-cache'})
+
 bearer = HTTPBearer()
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
@@ -394,7 +402,13 @@ def propose(body: TradeInput, me=Depends(user)):
 @app.get('/trades')
 def list_trades(me=Depends(user)):
     with db() as c:
-        return [dict(r) for r in c.execute('SELECT * FROM trades WHERE sender=? OR recipient=? ORDER BY created DESC', (me['id'],)*2)]
+        return [dict(r) for r in c.execute("""
+            SELECT t.*, w.title AS wanted_title, o.title AS offered_title,
+                   s.username AS sender_username, r.username AS recipient_username
+            FROM trades t JOIN books w ON w.id=t.wanted JOIN books o ON o.id=t.offered
+            JOIN users s ON s.id=t.sender JOIN users r ON r.id=t.recipient
+            WHERE t.sender=? OR t.recipient=? ORDER BY t.created DESC
+        """, (me['id'],)*2)]
 
 def trade(c, identifier, me):
     row = c.execute('SELECT * FROM trades WHERE id=? AND (sender=? OR recipient=?)', (identifier,me['id'],me['id'])).fetchone()

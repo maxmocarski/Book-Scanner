@@ -1,8 +1,6 @@
-.venv
-.git
+.venv/
 .env
-data
-bookbridge-data-backup*
-.pytest_cache
-__pycache__
-tests
+data/
+bookbridge-data-backup*/
+__pycache__/
+.pytest_cache/

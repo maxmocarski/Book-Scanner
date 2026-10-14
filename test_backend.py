@@ -176,3 +176,18 @@ def test_delete_cascades_images(client):
     c=client;_,a=account(c,'alice');book=add(c,a,('front','spine','back'))
     assert c.delete('/books/'+book,headers=a).status_code==204
     with main.db() as db:assert db.execute('SELECT COUNT(*) FROM book_images').fetchone()[0]==0
+
+def test_frontend_and_private_trade_labels(client):
+    response=client.get('/')
+    assert response.status_code==200
+    assert '<title>BookBridge' in response.text
+    assert '/static/app.js' in response.text
+    for path in ('/static/app.js','/static/app.css','/static/icon.svg'):
+        assert client.get(path).status_code==200
+    _,a=account(client,'reader');_,b=account(client,'friend')
+    x=add(client,a);y=add(client,b);connect(client,a,b)
+    client.post('/trades',headers=a,json={'wanted_book_id':y,'offered_book_id':x})
+    rows=client.get('/trades',headers=a).json()
+    assert rows[0]['sender_username']=='reader'
+    assert rows[0]['recipient_username']=='friend'
+    assert rows[0]['wanted_title']=='The Great Gatsby'
