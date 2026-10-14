@@ -134,7 +134,7 @@
             queueImages = [];
             updateQueueUI();
         }
-
+        
         async function processQueue() {
             if (queueImages.length === 0) return;
             document.getElementById('processStatus').innerText = "Processing...";
@@ -149,15 +149,23 @@
                 const res = await fetch('/api/scan-queue', { method: 'POST', body: formData });
                 const book = await res.json();
                 alert(`Successfully cataloged: "${book.title}" by ${book.author}`);
+                
+                // Clear the queue and reset UI state smoothly
                 queueImages = [];
                 updateQueueUI();
+                
+                // Restart video stream track if it got stuck
+                const video = document.getElementById('videoFeed');
+                if (video.srcObject) {
+                    const tracks = video.srcObject.getVideoTracks();
+                    tracks.forEach(track => track.enabled = true);
+                }
             } catch (err) {
                 alert("Error processing queue scan.");
             } finally {
                 document.getElementById('processStatus').innerText = "";
             }
         }
-
         function dataURItoBlob(dataURI) {
             const byteString = atob(dataURI.split(',')[1]);
             const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
