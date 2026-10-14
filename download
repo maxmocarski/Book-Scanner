@@ -6,3 +6,5 @@ bookbridge-data-backup*
 .pytest_cache
 __pycache__
 tests
+node_modules
+docs

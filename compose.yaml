@@ -21,4 +21,4 @@ volumes:
 networks:
   revolt-network:
     external: true
-    name: revolt_default
+    name: ${BOOKBRIDGE_NETWORK:-revolt_default}
