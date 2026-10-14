@@ -10,19 +10,15 @@ from pathlib import Path
 import secrets
 import sqlite3
 import time
-
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 from starlette.datastructures import UploadFile as FormUploadFile
-
-from scanning import Metadata, Mode, Scanner, ScanError, photo_bytes, valid_isbn
-from schema import initialize
-
+from core.scanning import Metadata, Mode, Scanner, ScanError, photo_bytes, valid_isbn
+from api.schema import initialize
 DATA = Path(os.getenv('BOOKBRIDGE_DATA', './data'))
-
 @contextmanager
 def db():
     DATA.mkdir(parents=True, exist_ok=True)
@@ -38,11 +34,9 @@ def db():
         raise
     finally:
         conn.close()
-
 @asynccontextmanager
 async def lifespan(app):
     DATA.mkdir(parents=True, exist_ok=True)
-    # Only one worker owns migration/recovery and inference. Do not use --workers.
     lockfile = (DATA / 'scanner.lock').open('a')
     try:
         try:
@@ -65,26 +59,21 @@ async def lifespan(app):
                     await task
     finally:
         lockfile.close()
-
 def cleanup_expired():
     with db() as c:
         for table in ('scans', 'sessions', 'invites'):
             c.execute(f'DELETE FROM {table} WHERE expires IS NOT NULL AND expires<=?', (int(time.time()),))
-
 async def expiry_loop():
     while True:
         await asyncio.sleep(60)
         await asyncio.to_thread(cleanup_expired)
-
 app = FastAPI(title='BookBridge', version='0.3.0', lifespan=lifespan,
               description='Private books, durable scan queue, up to three photos, Gemma + text enrichment, and friend swaps. Photos require Bearer authentication.')
-STATIC = Path(__file__).parent / 'static'
+STATIC = Path(__file__).parent.parent / 'static'
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
-
 @app.get('/', include_in_schema=False)
 def home():
     return FileResponse(STATIC / 'index.html', headers={'Cache-Control': 'no-cache'})
-
 bearer = HTTPBearer()
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
@@ -94,7 +83,6 @@ def now():
     return int(time.time())
 def fail(code, message):
     raise HTTPException(code, message)
-
 def user(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
     with db() as c:
         row = c.execute('SELECT u.id,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires>?',
@@ -102,39 +90,30 @@ def user(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
     if not row:
         fail(401, 'Sign in again.')
     return dict(row)
-
 class Credentials(BaseModel):
     username: str = Field(pattern=r'^[a-zA-Z0-9_]{3,32}$')
     password: str = Field(min_length=12, max_length=128)
-
 class BookInput(Metadata):
     title: str = Field(min_length=1, max_length=500)
     author: str = Field(min_length=1, max_length=500)
     available: bool = False
-
     @field_validator('title', 'author')
     @classmethod
     def no_blank(cls, v):
         if not v.strip():
             raise ValueError('Cannot be blank')
         return v.strip()
-
 class InviteInput(BaseModel):
     code: str = Field(min_length=20, max_length=100)
-
 class TradeInput(BaseModel):
     wanted_book_id: str
     offered_book_id: str
-
-
 def password_hash(password, salt):
     return hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1).hex()
-
 def session(c, user_id):
     token = secrets.token_urlsafe(32)
     c.execute('INSERT INTO sessions VALUES(?,?,?)', (digest(token), user_id, now()+7*86400))
     return {'access_token': token, 'token_type': 'bearer', 'expires_in': 7*86400, 'user_id': user_id}
-
 @app.post('/auth/register', status_code=201)
 def register(body: Credentials):
     salt = secrets.token_hex(16)
@@ -146,7 +125,6 @@ def register(body: Credentials):
         except sqlite3.IntegrityError:
             fail(409, 'Username already taken.')
         return session(c, identifier)
-
 @app.post('/auth/login')
 def login(body: Credentials):
     with db() as c:
@@ -156,23 +134,18 @@ def login(body: Credentials):
         if not row or not hmac.compare_digest(computed, row['password_hash']):
             fail(401, 'Incorrect username or password.')
         return session(c, row['id'])
-
 @app.post('/auth/logout', status_code=204)
 def logout(credentials: HTTPAuthorizationCredentials = Depends(bearer), me=Depends(user)):
     with db() as c:
         c.execute('DELETE FROM sessions WHERE token_hash=?', (digest(credentials.credentials),))
-
 @app.get('/me')
 def profile(me=Depends(user)):
     return me
-
 def friends(c, a, b):
     return c.execute('SELECT 1 FROM friends WHERE a=? AND b=?', tuple(sorted([a,b]))).fetchone() is not None
-
 def access(c, owner, me):
     if owner != me['id'] and not friends(c, owner, me['id']):
         fail(404, 'Not found.')
-
 @app.post('/friends/invites', status_code=201)
 def invite(me=Depends(user)):
     code = secrets.token_urlsafe(32)
@@ -180,7 +153,6 @@ def invite(me=Depends(user)):
         c.execute('DELETE FROM invites WHERE expires<=?', (now(),))
         c.execute('INSERT INTO invites VALUES(?,?,?)', (digest(code), me['id'], now()+86400))
     return {'code': code, 'expires_in': 86400, 'note': 'Share privately with a person you know. One use.'}
-
 @app.post('/friends/accept')
 def accept_invite(body: InviteInput, me=Depends(user)):
     with db() as c:
@@ -192,25 +164,20 @@ def accept_invite(body: InviteInput, me=Depends(user)):
         c.execute('INSERT OR IGNORE INTO friends VALUES(?,?)', tuple(sorted([me['id'],row['user_id']])))
         c.execute('DELETE FROM invites WHERE code_hash=?', (digest(body.code),))
     return {'friend_id': row['user_id']}
-
 @app.get('/friends')
 def list_friends(me=Depends(user)):
     with db() as c:
         return [dict(r) for r in c.execute('SELECT id,username FROM users WHERE id IN (SELECT CASE WHEN a=? THEN b ELSE a END FROM friends WHERE a=? OR b=?)', (me['id'],)*3)]
-
 @app.delete('/friends/{friend_id}', status_code=204)
 def remove_friend(friend_id: str, me=Depends(user)):
     with db() as c:
         c.execute('DELETE FROM friends WHERE a=? AND b=?', tuple(sorted([me['id'],friend_id])))
         c.execute("UPDATE trades SET status='cancelled' WHERE status IN ('pending','accepted') AND ((sender=? AND recipient=?) OR (sender=? AND recipient=?))", (me['id'],friend_id,friend_id,me['id']))
-
-
 def scan_row(c, identifier, owner):
     row = c.execute('SELECT * FROM scans WHERE id=? AND owner=? AND (expires IS NULL OR expires>?)', (identifier,owner,int(time.time()))).fetchone()
     if not row:
         fail(404, 'Scan not found or expired.')
     return row
-
 def public_scan(c, row):
     identifier = row['id']
     position = None
@@ -224,13 +191,11 @@ def public_scan(c, row):
         result[key] = json.loads(row[key])
     result['images'] = [{'position':r['position'],'view':r['view'],'url':f'/scans/{identifier}/images/{r["position"]}'} for r in c.execute('SELECT position,view FROM scan_images WHERE scan_id=? ORDER BY position',(identifier,))]
     return result
-
 @app.post('/scans', status_code=202)
 async def scan(request: Request, front: UploadFile | None = File(None), spine: UploadFile | None = File(None),
                back: UploadFile | None = File(None), enrichment: Mode | None = Form(None),
                cover: UploadFile | None = File(None, description='Legacy name for front. Do not combine with front.'),
                details: UploadFile | None = File(None, description='Legacy name for back. Do not combine with back.'), me=Depends(user)):
-    # Reject duplicates/unknown uploads instead of quietly losing a fourth photo.
     form = await request.form()
     uploads = [(name,value) for name,value in form.multi_items() if isinstance(value,FormUploadFile)]
     if not 1 <= len(uploads) <= 3:
@@ -262,7 +227,6 @@ async def scan(request: Request, front: UploadFile | None = File(None), spine: U
         fail(429,str(e))
     with db() as c:
         return public_scan(c,scan_row(c,identifier,me['id']))
-
 @app.get('/scans')
 def list_scans(limit: int = 100, me=Depends(user)):
     if not 1 <= limit <= 500:
@@ -270,12 +234,10 @@ def list_scans(limit: int = 100, me=Depends(user)):
     with db() as c:
         rows = c.execute('SELECT * FROM scans WHERE owner=? AND (expires IS NULL OR expires>?) ORDER BY seq DESC LIMIT ?', (me['id'],now(),limit)).fetchall()
         return [public_scan(c,r) for r in rows]
-
 @app.get('/scans/{scan_id}')
 def scan_status(scan_id: str, me=Depends(user)):
     with db() as c:
         return public_scan(c,scan_row(c,scan_id,me['id']))
-
 @app.get('/scans/{scan_id}/images/{position}')
 def scan_photo(scan_id: str, position: int, me=Depends(user)):
     with db() as c:
@@ -284,7 +246,6 @@ def scan_photo(scan_id: str, position: int, me=Depends(user)):
         if not row:
             fail(404,'Image not found.')
         return Response(row['image'],media_type='image/jpeg',headers={'Cache-Control':'no-store'})
-
 @app.post('/scans/{scan_id}/retry', status_code=202)
 def retry_scan(scan_id: str, me=Depends(user)):
     scanner = app.state.scanner
@@ -299,7 +260,6 @@ def retry_scan(scan_id: str, me=Depends(user)):
         result = public_scan(c,scan_row(c,scan_id,me['id']))
     scanner.wake.set()
     return result
-
 @app.post('/scans/{scan_id}/save', status_code=201)
 def save(scan_id: str, body: BookInput, me=Depends(user)):
     try:
@@ -317,41 +277,33 @@ def save(scan_id: str, body: BookInput, me=Depends(user)):
         c.execute('INSERT INTO book_images SELECT ?,position,view,image FROM scan_images WHERE scan_id=?', (identifier,scan_id))
         c.execute('DELETE FROM scans WHERE id=?', (scan_id,))
     return {'book_id': identifier}
-
 @app.delete('/scans/{scan_id}', status_code=204)
 def discard(scan_id: str, me=Depends(user)):
     with db() as c:
         scan_row(c,scan_id,me['id'])
-        # A worker in flight can finish its HTTP call but cannot resurrect this row.
         c.execute('DELETE FROM scans WHERE id=? AND owner=?', (scan_id,me['id']))
-
 def book(c, identifier):
     row = c.execute('SELECT * FROM books WHERE id=?', (identifier,)).fetchone()
     if not row:
         fail(404, 'Book not found.')
     return row
-
 def locked(c, identifier):
     return c.execute("SELECT 1 FROM trades WHERE status='accepted' AND (wanted=? OR offered=?)", (identifier,identifier)).fetchone() is not None
-
 def public_book(c, row):
     result = {k:row[k] for k in row.keys() if k != 'scan_audit'}
     result['scan_audit'] = json.loads(row['scan_audit'])
     result['images'] = [{'position':r['position'],'view':r['view'],'url':f'/books/{row["id"]}/images/{r["position"]}'} for r in c.execute('SELECT position,view FROM book_images WHERE book_id=? ORDER BY position',(row['id'],))]
     result['image_url'] = '/books/'+row['id']+'/image'
     return result
-
 @app.get('/books')
 def collection(owner_id: str | None = None, me=Depends(user)):
     owner = owner_id or me['id']
     with db() as c:
         access(c,owner,me)
         return [public_book(c,r) for r in c.execute('SELECT * FROM books WHERE owner=? ORDER BY created DESC,id', (owner,))]
-
 @app.get('/books/{book_id}/image')
 def photo(book_id: str, me=Depends(user)):
     return book_photo(book_id,0,me)
-
 @app.get('/books/{book_id}/images/{position}')
 def book_photo(book_id: str, position: int, me=Depends(user)):
     with db() as c:
@@ -361,7 +313,6 @@ def book_photo(book_id: str, position: int, me=Depends(user)):
         if not image:
             fail(404,'Image not found.')
         return Response(image['image'], media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
-
 @app.patch('/books/{book_id}')
 def edit(book_id: str, body: BookInput, me=Depends(user)):
     try:
@@ -377,7 +328,6 @@ def edit(book_id: str, body: BookInput, me=Depends(user)):
         c.execute('UPDATE books SET title=?,author=?,isbn=?,available=? WHERE id=?', (body.title,body.author,isbn,int(body.available),book_id))
         c.execute("UPDATE trades SET status='cancelled' WHERE status='pending' AND (wanted=? OR offered=?)", (book_id,book_id))
         return public_book(c,book(c,book_id))
-
 @app.delete('/books/{book_id}', status_code=204)
 def delete_book(book_id: str, me=Depends(user)):
     with db() as c:
@@ -386,7 +336,6 @@ def delete_book(book_id: str, me=Depends(user)):
         if c.execute('SELECT 1 FROM trades WHERE wanted=? OR offered=?', (book_id,book_id)).fetchone():
             fail(409,'Book has trade history. Set available=false to remove it from trading.')
         c.execute('DELETE FROM books WHERE id=?', (book_id,))
-
 @app.post('/trades', status_code=201)
 def propose(body: TradeInput, me=Depends(user)):
     with db() as c:
@@ -398,7 +347,6 @@ def propose(body: TradeInput, me=Depends(user)):
         identifier = uid()
         c.execute('INSERT INTO trades(id,sender,recipient,wanted,offered,status,created) VALUES(?,?,?,?,?,?,?)', (identifier,me['id'],wanted['owner'],wanted['id'],offered['id'],'pending',now()))
     return {'trade_id': identifier, 'status': 'pending'}
-
 @app.get('/trades')
 def list_trades(me=Depends(user)):
     with db() as c:
@@ -409,13 +357,11 @@ def list_trades(me=Depends(user)):
             JOIN users s ON s.id=t.sender JOIN users r ON r.id=t.recipient
             WHERE t.sender=? OR t.recipient=? ORDER BY t.created DESC
         """, (me['id'],)*2)]
-
 def trade(c, identifier, me):
     row = c.execute('SELECT * FROM trades WHERE id=? AND (sender=? OR recipient=?)', (identifier,me['id'],me['id'])).fetchone()
     if not row:
         fail(404,'Trade not found.')
     return row
-
 @app.post('/trades/{trade_id}/accept')
 def accept_trade(trade_id: str, me=Depends(user)):
     with db() as c:
@@ -432,7 +378,6 @@ def accept_trade(trade_id: str, me=Depends(user)):
         c.execute("UPDATE trades SET status='accepted' WHERE id=?", (trade_id,))
         c.execute("UPDATE trades SET status='cancelled' WHERE id<>? AND status='pending' AND (wanted IN (?,?) OR offered IN (?,?))", (trade_id,t['wanted'],t['offered'],t['wanted'],t['offered']))
     return {'status': 'accepted'}
-
 @app.post('/trades/{trade_id}/cancel')
 def cancel_trade(trade_id: str, me=Depends(user)):
     with db() as c:
@@ -441,7 +386,6 @@ def cancel_trade(trade_id: str, me=Depends(user)):
             fail(409,'Trade already closed.')
         c.execute("UPDATE trades SET status='cancelled' WHERE id=?", (trade_id,))
     return {'status': 'cancelled'}
-
 @app.post('/trades/{trade_id}/confirm-handoff')
 def handoff(trade_id: str, me=Depends(user)):
     with db() as c:
@@ -458,7 +402,6 @@ def handoff(trade_id: str, me=Depends(user)):
             c.execute('UPDATE books SET owner=?,available=0 WHERE id=?', (t['recipient'],t['offered']))
             c.execute("UPDATE trades SET status='completed' WHERE id=?", (trade_id,))
         return dict(trade(c,trade_id,me))
-
 @app.get('/health')
 def health():
     return {'status': 'ok'}
