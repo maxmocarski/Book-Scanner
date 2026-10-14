@@ -4,10 +4,9 @@ import threading
 from fastapi.testclient import TestClient
 from PIL import Image
 import pytest
-import main
-from scanning import Metadata, Scanner, ScanError, baseline
-from schema import initialize
-
+import api.main as main
+from core.scanning import Metadata, Scanner, ScanError, baseline
+from api.schema import initialize
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(main,'DATA',tmp_path)
@@ -21,22 +20,17 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(Scanner,'identify',identify)
     monkeypatch.setattr(Scanner,'enrich',enrich)
     with TestClient(main.app) as c:yield c
-
 def account(c,name):
     r=c.post('/auth/register',json={'username':name,'password':'my-testing-password'})
     assert r.status_code==201,r.text
     j=r.json();return j['user_id'],{'Authorization':'Bearer '+j['access_token']}
-
 def jpeg():
     out=BytesIO();Image.new('RGB',(100,150),'blue').save(out,format='JPEG');return out.getvalue()
-
 def enqueue(c,h,views=('front',),mode='cleanup'):
     r=c.post('/scans',headers=h,data={'enrichment':mode},files=[(v,(v+'.jpg',jpeg(),'image/jpeg')) for v in views])
     assert r.status_code==202,r.text
     return r.json()
-
 def process(c):return c.portal.call(main.app.state.scanner.process_next)
-
 def add(c,h,views=('front',)):
     s=enqueue(c,h,views);assert s['status']=='queued';assert process(c)
     r=c.get(s['status_url'],headers=h).json();assert r['status']=='ready',r
@@ -44,12 +38,10 @@ def add(c,h,views=('front',)):
     saved=c.post(s['status_url']+'/save',headers=h,json=body);assert saved.status_code==201,saved.text
     assert c.post(s['status_url']+'/save',headers=h,json=body).status_code==404
     return saved.json()['book_id']
-
 def connect(c,a,b):
     code=c.post('/friends/invites',headers=a).json()['code']
     assert c.post('/friends/accept',headers=b,json={'code':code}).status_code==200
     assert c.post('/friends/accept',headers=b,json={'code':code}).status_code==404
-
 def test_privacy_three_images_and_scan_save(client):
     c=client;aid,a=account(c,'alice');_,b=account(c,'bob')
     book=add(c,a,('front','spine','back'))
@@ -68,7 +60,6 @@ def test_privacy_three_images_and_scan_save(client):
         assert db.execute('SELECT COUNT(*) FROM book_images').fetchone()[0]==3
     assert c.post('/auth/logout',headers=a).status_code==204
     assert c.get('/books',headers=a).status_code==401
-
 def test_swap_requires_both_and_reserves(client):
     c=client;aid,a=account(c,'alice');bid,b=account(c,'bob');_,other=account(c,'outsider')
     x=add(c,a,('front','spine','back'));y=add(c,b);z=add(c,a)
@@ -87,7 +78,6 @@ def test_swap_requires_both_and_reserves(client):
     assert y in [r['id'] for r in c.get('/books',headers=a).json()]
     moved=next(r for r in c.get('/books',headers=b).json() if r['id']==x);assert len(moved['images'])==3
     assert c.post(f'/trades/{t}/confirm-handoff',headers=b).status_code==409
-
 def test_validation_and_auth(client):
     c=client;_,a=account(c,'alice')
     assert c.post('/auth/register',json={'username':'ALICE','password':'my-testing-password'}).status_code==409
@@ -102,7 +92,6 @@ def test_validation_and_auth(client):
     assert c.post('/scans',headers=a,files={'spine':('x.jpg',jpeg(),'image/jpeg')}).status_code==422
     assert c.post('/scans',headers=a,data={'enrichment':'invalid'},files={'front':('x.jpg',jpeg(),'image/jpeg')}).status_code==422
     assert len(enqueue(c,a,('cover','details'))['images'])==2
-
 def test_remove_friend_cancels_trade(client):
     c=client;_,a=account(c,'alice');bid,b=account(c,'bob')
     x=add(c,a);y=add(c,b);connect(c,a,b)
@@ -111,7 +100,6 @@ def test_remove_friend_cancels_trade(client):
     assert c.post(f'/trades/{t}/confirm-handoff',headers=b).status_code==409
     assert c.get(f'/books/{x}/image',headers=b).status_code==404
     assert c.patch('/books/'+x,headers=a,json={'title':'x','author':'y','available':True}).status_code==200
-
 def test_owner_expiry_and_pending_save(client):
     c=client;_,a=account(c,'alice');_,b=account(c,'bob')
     s=enqueue(c,a,('front','back'));path=s['status_url'];body={'title':'x','author':'y','isbn':None}
@@ -128,7 +116,6 @@ def test_owner_expiry_and_pending_save(client):
     with main.db() as db:
         assert db.execute('SELECT COUNT(*) FROM scans').fetchone()[0]==0
         assert db.execute('SELECT COUNT(*) FROM scan_images').fetchone()[0]==0
-
 def test_fifo_and_queue_limits(client):
     c=client;_,a=account(c,'alice');main.app.state.scanner.settings.max_user_pending=2
     one=enqueue(c,a);two=enqueue(c,a,('front','back'))
@@ -139,7 +126,6 @@ def test_fifo_and_queue_limits(client):
     assert c.get(two['status_url'],headers=a).json()['queue_position']==1
     assert process(c);assert c.get(two['status_url'],headers=a).json()['status']=='ready'
     assert not process(c)
-
 def test_cancel_in_flight_and_failure_retry(client,monkeypatch):
     c=client;_,a=account(c,'alice');first=enqueue(c,a);second=enqueue(c,a)
     started=threading.Event();gate=asyncio.Event()
@@ -162,7 +148,6 @@ def test_cancel_in_flight_and_failure_retry(client,monkeypatch):
     assert c.delete(third['status_url'],headers=a).status_code==204
     monkeypatch.setattr(Scanner,'identify',blocked);process(c)
     assert c.get(second['status_url'],headers=a).json()['status']=='ready'
-
 def test_restart_recovery(client):
     c=client;_,a=account(c,'alice');one=enqueue(c,a,('front','spine','back'));two=enqueue(c,a)
     with main.db() as db:db.execute("UPDATE scans SET status='enriching' WHERE id=?",(one['scan_id'],))
@@ -171,12 +156,10 @@ def test_restart_recovery(client):
     assert len(c.get(one['status_url'],headers=a).json()['images'])==3
     assert process(c);assert c.get(one['status_url'],headers=a).json()['status']=='ready'
     assert c.get(two['status_url'],headers=a).json()['status']=='queued'
-
 def test_delete_cascades_images(client):
     c=client;_,a=account(c,'alice');book=add(c,a,('front','spine','back'))
     assert c.delete('/books/'+book,headers=a).status_code==204
     with main.db() as db:assert db.execute('SELECT COUNT(*) FROM book_images').fetchone()[0]==0
-
 def test_frontend_and_private_trade_labels(client):
     response=client.get('/')
     assert response.status_code==200
