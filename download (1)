@@ -1,8 +1,0 @@
-.venv
-.git
-.env
-data
-bookbridge-data-backup*
-.pytest_cache
-__pycache__
-tests
