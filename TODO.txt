@@ -1,1 +1,18 @@
+Quality of life stuff
+make the min password like 8, this isnt fort knox
+have an auto review button, jsut auto acesspitng all the reviews with a discaimer
+make a quick add friends page, off of location, already existing friends, the friencd sof the most recent friends the user has added.
+change the top bar to the bottom, dont reinvet the wheel with GUI
+while havign a username is good, haveing a name is good too, 
+maybe impletment an email notification the user can get if they revice book requests. 
+chnage from, queue to book queue
+make firends and trade two different tabs 
+add back the secondary ai review, even though knwo needed can be toggled
+change lists from apple glass to a drop down with toggles.
+maybe add some popular books now section.
 
+SETTINGS TAB----------------------------
+Have privicy toggles, where you are not discoverable as a friend. or oyu can maek your account priveatye (home library onyl accont.)
+stats page, how many unique books you have, how many book reviwes you have writen and hwo mnay books you have traded/ recived. how many total pages you have read.
+put the secondary review here, 
+put the log out button here too, add the confirm after first click.
