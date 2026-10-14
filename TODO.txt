@@ -1,4 +1,4 @@
-Quality of life stuff
+Quality of life stuff----------------------
 make the min password like 8, this isnt fort knox
 have an auto review button, jsut auto acesspitng all the reviews with a discaimer
 make a quick add friends page, off of location, already existing friends, the friencd sof the most recent friends the user has added.
@@ -16,3 +16,9 @@ Have privicy toggles, where you are not discoverable as a friend. or oyu can mae
 stats page, how many unique books you have, how many book reviwes you have writen and hwo mnay books you have traded/ recived. how many total pages you have read.
 put the secondary review here, 
 put the log out button here too, add the confirm after first click.
+
+
+ADMIN PANEL--------------------------------
+make certain accoutns admin accounts with the ablty to ban users, take out books.
+create bot detectors
+have admin panel show some cool stats ig
