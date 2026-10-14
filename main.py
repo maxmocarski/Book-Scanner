@@ -36,9 +36,9 @@ SUMMARY_MODEL = "llama3.2:3b" # Smaller model for lightweight summaries
 
 def query_ollama_vision(images_b64: List[str]) -> Dict[str, Any]:
     prompt = (
-        "You are an expert librarian and book identifier. Analyze these book images (cover and/or ISBN page). "
-        "Extract the book's Title, Author, and ISBN number. "
-        "Reply with JSON only matching this exact structure: "
+        "Analyze the provided image of a book cover, spine, or barcode. "
+        "Carefully read the title, author's name, and any visible ISBN number. "
+        "Return your answer strictly as a JSON object with these exact keys: "
         '{"title": "...", "author": "...", "isbn": "..."}'
     )
     payload = {
@@ -46,13 +46,22 @@ def query_ollama_vision(images_b64: List[str]) -> Dict[str, Any]:
         "prompt": prompt,
         "images": images_b64,
         "stream": False,
-        "format": "json"
+        # Removed "format": "json" temporarily so the model doesn't lock up if it adds conversational text, 
+        # and let our parser handle cleaning it up.
     }
     try:
         response = requests.post(OLLAMA_URL, json=payload, timeout=60)
         response.raise_for_status()
-        raw_output = response.json().get("response", "{}")
-        return json.loads(raw_output)
+        raw_text = response.json().get("response", "{}")
+
+        # Clean up markdown code blocks if the model includes them
+        clean_str = raw_text.replace("```json", "").replace("```", "").strip()
+        start_idx = clean_str.find("{")
+        end_idx = clean_str.rfind("}")
+        if start_idx != -1 and end_idx != -1:
+            json_str = clean_str[start_idx:end_idx+1]
+            return json.loads(json_str)
+        return json.loads(clean_str)
     except Exception as e:
         print(f"Vision error: {e}")
         return {"title": "Unknown Book", "author": "Unknown Author", "isbn": "N/A"}
