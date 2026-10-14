@@ -4,7 +4,7 @@ Photograph physical books, build a private library, and arrange swaps with frien
 
 BookBridge runs a FastAPI backend and a simple HTML/CSS/JavaScript frontend. Book recognition uses Gemma through your own Ollama server; SearXNG lookup is optional.
 
-================================================================================
+
 WHAT IT DOES
 ================================================================================
 
@@ -15,7 +15,7 @@ WHAT IT DOES
 - Invite friends, browse their libraries, and request book-for-book swaps.
 - Transfer ownership and photos after both people confirm the physical exchange.
 
-================================================================================
+
 QUICK START & RUNNING LOCALLY
 ================================================================================
 
@@ -34,7 +34,6 @@ Open http://localhost:8503/ for the app; /docs provides developer API controls. 
 
 The primary model must support images. The default gemma3:1b second pass only handles text. A cold model or CPU inference can take longer; models are unloaded after each pass by default to reduce memory pressure.
 
-================================================================================
 DOCKER DEPLOYMENT
 ================================================================================
 
@@ -59,7 +58,7 @@ BookBridge's source is ~/bookbridge; the active Compose file is ~/revolt/docker-
 
 This rebuilds BookBridge separately from ReVolt. The repository cleanup does not change the database schema, API paths, container port, or mounted data.
 
-================================================================================
+
 TECHNICAL REFERENCE
 ================================================================================
 
@@ -106,7 +105,7 @@ Lookup mode requires JSON results enabled in the existing SearXNG settings.yml:
 
 Merge this into existing settings and restart SearXNG. Lookup failures fall back to text cleanup. Search suggestions are unverified and may describe another edition.
 
-================================================================================
+
 EXISTING DATA & MIGRATION
 ================================================================================
 
@@ -121,7 +120,7 @@ Keep the backup outside your Git repository. Update code, then rebuild/start usi
 
 Ready/failed scan results and their unsaved photos expire 24 hours AFTER PROCESSING FINISHES, with cleanup approximately every minute and at startup. Waiting/in-flight jobs do not expire while processing; cancel them to free storage. Saving transfers photos to the catalog; discarding/deleting a result cascades removal of its photo rows. Persistent deleted SQLite pages/backups are not secure-erased automatically.
 
-================================================================================
+
 PHONE ACCESS & PRIVACY
 ================================================================================
 
@@ -131,7 +130,7 @@ Accounts and book photos are private; accepted friends can see each other's enti
 
 Public hosting needs additional controls. Registration is currently open, and there are no public-facing rate limits, account recovery or total storage quotas. A public link permits strangers to register and submit scans. Model output, ISBN checksums and search snippets do not guarantee the correct edition: review before saving.
 
-================================================================================
+
 PROJECT LAYOUT
 ================================================================================
 
@@ -148,7 +147,7 @@ Dockerfile            Container deployment
 compose.yaml          Container deployment configuration
 .env.example          Example configuration; copy to private .env
 
-================================================================================
+
 TESTING
 ================================================================================
 
