@@ -1,8 +1,0 @@
-.venv/
-.env
-data/
-bookbridge-data-backup*/
-__pycache__/
-.pytest_cache/
-node_modules/
-package-lock.json
