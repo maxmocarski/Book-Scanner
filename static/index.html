@@ -8,6 +8,7 @@
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/app.js" defer></script>
+  <script src="/static/community.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -17,7 +18,7 @@
     </a>
     <div id="account" hidden>
       <span id="username"></span>
-      <button id="logout" class="text-button">Sign out</button>
+
     </div>
   </header>
 
@@ -43,8 +44,9 @@
             <input id="auth-name" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9_]{3,32}" placeholder="Your username">
           </label>
           <label>Password
-            <input id="auth-password" type="password" autocomplete="current-password" required minlength="12" maxlength="128" placeholder="At least 12 characters">
+            <input id="auth-password" type="password" autocomplete="current-password" required minlength="8" maxlength="128" placeholder="At least 8 characters">
           </label>
+          <label class="honeypot" aria-hidden="true">Website<input id="auth-website" tabindex="-1" autocomplete="off"></label>
           <p id="auth-error" class="inline-error" role="alert"></p>
           <button class="primary full" id="auth-submit">Sign in</button>
         </form>
@@ -59,9 +61,11 @@
     <div id="workspace" hidden>
       <nav class="navigation" aria-label="Main navigation">
         <button data-tab="scan" class="active" aria-pressed="true">Scan a book</button>
-        <button data-tab="queue" aria-pressed="false">Queue <span id="queue-count" class="count" hidden>0</span></button>
+        <button data-tab="queue" aria-pressed="false">Book queue <span id="queue-count" class="count" hidden>0</span></button>
         <button data-tab="library" aria-pressed="false">My library</button>
-        <button data-tab="friends" aria-pressed="false">Friends &amp; trades</button>
+        <button data-tab="friends" aria-pressed="false">Friends</button>
+        <button data-tab="trades" aria-pressed="false">Trades</button>
+        <button data-tab="settings" aria-pressed="false">Settings</button>
       </nav>
 
       <!-- Scan Page -->
@@ -100,13 +104,8 @@
             <div id="photo-slots" class="photo-slots"></div>
             <input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
             <button id="upload-photo" class="secondary full">Upload front photo</button>
-            <label class="mode-label">After scanning
-              <select id="scan-mode">
-                <option value="cleanup">Clean up the text</option>
-                <option value="lookup">Look up the book</option>
-                <option value="off">Read photos only</option>
-              </select>
-            </label>
+            <label>Scan into<select id="scan-library"><option value="">My library</option></select></label>
+            <p class="small muted">Secondary AI review can be changed in Settings.</p>
             <button id="queue-book" class="primary full" disabled>Add book to queue <span aria-hidden="true">→</span></button>
             <p class="small muted">You can photograph the next book while this one scans.</p>
             <p id="scan-feedback" class="feedback" role="status"></p>
@@ -119,11 +118,13 @@
         <div class="page-heading">
           <div>
             <span class="eyebrow">KEEP THE BOOKS COMING</span>
-            <h1>Your scan queue.</h1>
+            <h1>Your book queue.</h1>
             <p class="muted">Review finished scans before adding them to your library.</p>
           </div>
           <button id="queue-refresh" class="secondary">Refresh</button>
         </div>
+        <div class="button-row"><label>Queue<select id="queue-library"><option value="">My library</option></select></label><button id="bulk-review" class="secondary">Accept all ready</button></div>
+        <p class="small muted">Accept all ready saves the current finished scans without checking their fields. AI can make mistakes; you can edit saved books afterward.</p>
         <div id="queue-list" class="queue-list"></div>
       </section>
 
@@ -138,7 +139,7 @@
           <button id="library-refresh" class="secondary">Refresh</button>
         </div>
         
-        <div class="library-tools">
+        <details class="panel filters"><summary>Search and filter books</summary><div class="library-tools">
           <label class="sr-only" for="library-search">Search books</label>
           <input id="library-search" type="search" placeholder="Search title, author or ISBN">
           
@@ -152,6 +153,7 @@
           </label>
         </div>
         
+        </details>
         <p id="library-count" class="muted small"></p>
         <div id="book-grid" class="book-grid"></div>
       </section>
@@ -194,8 +196,53 @@
         <h2 class="section-title">Your people</h2>
         <div id="friend-list" class="friend-list"></div>
         
-        <h2 class="section-title">Your trades</h2>
-        <div id="trade-list" class="trade-list"></div>
+        <details class="panel" open><summary>Quick add friends</summary>
+          <p class="muted">Opt in under Settings to find people in the same town or through mutual friends. Requests need acceptance.</p>
+          <div id="suggestions"></div>
+        </details>
+        <details class="panel" open><summary>Friend requests</summary><div id="friend-requests"></div></details>
+      </section>
+      <section id="page-trades" class="page" hidden><h1>Your trades</h1><p class="muted">Requests and handoffs, in one place.</p><div id="trade-list" class="trade-list"></div></section>
+      <section id="page-settings" class="page" hidden>
+        <h1>Settings</h1>
+        <form id="settings-form" class="settings-layout">
+          <details class="panel" open><summary>Your profile</summary>
+            <label>Display name<input id="setting-name" maxlength="80" placeholder="What friends call you"></label>
+            <label>Town or city (optional)<input id="setting-town" maxlength="100" placeholder="Fairfield, CT"></label>
+            <p class="muted small">Used to match the same town when discovery is on. No GPS location is collected.</p>
+          </details>
+          <details class="panel" open><summary>Privacy</summary>
+            <label class="check"><input id="setting-discovery" type="checkbox">Let people discover me</label>
+            <label class="check"><input id="setting-private" type="checkbox">Home library only</label>
+            <p class="muted small">Home library only hides your personal shelf from friends, turns off discovery, and cancels open swaps. Shared libraries you joined still work.</p>
+          </details>
+          <details class="panel" open><summary>AI scanning</summary>
+            <label class="check"><input id="setting-secondary" type="checkbox">Use a second AI review after scanning</label>
+            <label>Second review<select id="scan-mode"><option value="cleanup">Fix text and OCR mistakes</option><option value="lookup">Look up the book, then check text</option></select></label>
+            <p class="muted small">Applies to new scans. You can still review each result before saving.</p>
+          </details>
+          <details class="panel"><summary>Email notifications</summary>
+            <label>Email (optional)<input id="setting-email" type="email" maxlength="254"></label>
+            <label class="check"><input id="setting-email-notify" type="checkbox">Email me about new book requests</label>
+            <p id="email-status" class="muted small"></p>
+            <button id="email-send" type="button" class="secondary">Send verification code</button>
+            <label>Verification code<input id="email-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"></label>
+            <button id="email-verify" type="button" class="secondary">Verify email</button>
+          </details>
+          <button class="primary">Save settings</button><p id="settings-error" role="alert" class="inline-error"></p>
+        </form>
+        <div class="button-row settings-actions"><button data-tab="stats" class="secondary">My reading stats</button><button id="admin-open" data-tab="admin" class="secondary" hidden>Admin panel</button><button id="logout" class="text-button danger">Sign out</button></div>
+        <details class="panel" open><summary>Shared libraries</summary><p class="muted">An admin creates a library and its manager gives people permission to scan into its queue.</p><div id="shared-libraries"></div></details>
+      </section>
+      <section id="page-stats" class="page" hidden><h1>Your reading life</h1><p class="muted">Pages and reviews come from your reading log. A completed swap counts as one book given and one received.</p><div id="reading-stats" class="stats-grid"></div>
+        <h2>Reading journal</h2><p class="muted">Open a book in your library to record pages, a rating, or a review.</p><div id="reading-journal"></div>
+        <details class="panel" open><summary>Popular on BookBridge</summary><p class="muted small">Books on at least three discoverable personal shelves. These are community favorites, not a global bestseller list.</p><div id="popular-books"></div></details>
+      </section>
+      <section id="page-admin" class="page" hidden><h1>Admin panel</h1><div id="admin-stats" class="stats-grid"></div>
+        <details class="panel" open><summary>Create a shared library</summary><form id="create-library-form"><label>Library name<input id="new-library-name" required maxlength="100"></label><button class="primary">Create library</button></form></details>
+        <details class="panel" open><summary>Accounts</summary><form id="admin-user-search"><label>Find username<input id="admin-user-query" maxlength="100"></label><button class="secondary">Search</button></form><div id="admin-users"></div></details>
+        <details class="panel"><summary>Remove a book</summary><form id="admin-book-search"><label>Title or book ID<input id="admin-book-query" maxlength="500"></label><button class="secondary">Search</button></form><div id="admin-books"></div></details>
+        <details class="panel"><summary>Activity and bot signals</summary><p class="muted">Repeated requests and filled bot traps are signals to investigate, not proof someone is a bot.</p><div id="admin-events"></div></details>
       </section>
     </div>
   </main>
@@ -259,6 +306,7 @@
         <button class="primary">Save changes</button>
         <button type="button" id="delete-book" class="text-button danger">Remove book</button>
       </div>
+      <button type="button" id="reading-open" class="secondary">Reading log</button>
       <button type="button" id="request-swap" class="primary full" hidden>Request a swap</button>
     </form>
   </dialog>
@@ -280,6 +328,9 @@
     </form>
   </dialog>
 
+  <dialog id="reading-dialog"><div class="dialog-heading"><h2 id="reading-title">Reading log</h2><button class="icon-button" data-close="reading-dialog" aria-label="Close reading log">×</button></div>
+    <form id="reading-form"><label>Pages read so far<input id="reading-pages" type="number" min="0" max="100000" required></label><label class="check"><input id="reading-finished" type="checkbox">Finished this book</label><label>Rating<select id="reading-rating"><option value="">Not rated</option><option value="1">1 star</option><option value="2">2 stars</option><option value="3">3 stars</option><option value="4">4 stars</option><option value="5">5 stars</option></select></label><label>Your private review<textarea id="reading-review" maxlength="5000" rows="5"></textarea></label><button class="primary">Save reading log</button><p id="reading-error" class="inline-error" role="alert"></p></form>
+  </dialog>
   <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
