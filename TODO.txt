@@ -22,3 +22,6 @@ ADMIN PANEL--------------------------------
 make certain accoutns admin accounts with the ablty to ban users, take out books.
 create bot detectors
 have admin panel show some cool stats ig
+
+API STUFF (IGNORE)-------------------------
+redo the API to use tdarr to make the camera easier/secondary ai easier.
