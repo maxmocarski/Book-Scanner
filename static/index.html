@@ -6,10 +6,10 @@
   <meta name="theme-color" content="#283d32">
   <title>BookBridge — your books, connected</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.5.0">
-  <script src="/static/app.js?v=0.5.0" defer></script>
-  <script src="/static/community.js?v=0.5.0" defer></script>
-  <script src="/static/mobile.js?v=0.5.0" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.5.1">
+  <script src="/static/app.js?v=0.5.1" defer></script>
+  <script src="/static/community.js?v=0.5.1" defer></script>
+  <script src="/static/mobile.js?v=0.5.1" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -107,6 +107,7 @@
             <input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
             <button id="upload-photo" class="secondary full">Upload front photo</button>
             <label>Scan into<select id="scan-library"><option value="">My library</option></select></label>
+            <label>Shelf <span class="small muted">optional</span><input id="scan-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
             <p class="small muted">Secondary AI review can be changed in Settings.</p>
             <button id="queue-book" class="primary full" disabled>Add book to queue <span aria-hidden="true">→</span></button>
             <p class="small muted">You can photograph the next book while this one scans.</p>
@@ -275,6 +276,7 @@
       <label>ISBN <span class="muted small">optional</span>
         <input id="review-isbn" maxlength="32" placeholder="Leave blank if unknown">
       </label>
+      <label>Shelf <span class="small muted">optional</span><input id="review-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
       <div id="review-notes" class="review-notes"></div>
       <label class="check">
         <input id="review-available" type="checkbox"> Available to trade with friends
@@ -302,6 +304,7 @@
       <label>ISBN <span class="muted small">optional</span>
         <input id="book-isbn" maxlength="32">
       </label>
+      <label>Shelf <span class="small muted">optional</span><input id="book-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
       <label class="check" id="book-available-label">
         <input id="book-available" type="checkbox"> Available to trade
       </label>
