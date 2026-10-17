@@ -29,7 +29,7 @@ function openCopies(copies) {
   $('copies-list').replaceChildren();
   copies.forEach((book,index)=>{
     const row=e('div','compact-row');
-    row.append(e('span','','Copy '+(index+1)+' · '+(reserved(book.id)?'Reserved':book.available?'Available to trade':'On the shelf')),
+    row.append(e('span','','Copy '+(index+1)+(book.shelf ? ' · '+book.shelf : '')+' · '+(reserved(book.id)?'Reserved':book.available?'Available to trade':'On the shelf')),
       button('Open copy '+(index+1),'secondary',()=>{$('copies-dialog').close();openBook(book);}));
     $('copies-list').append(row);
   });
