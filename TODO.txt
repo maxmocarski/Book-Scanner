@@ -1,22 +1,24 @@
-OVERLYING THEME: MAKE THIS ALL WORK ON IPHONES!!!
+OVERALL THEME: MAKE THIS ALL WORK ON IPHONES!!!
 
 Quality of life stuff----------------------
+
 make the frame more accurate, or just get rid of it
-put duplicate books in the same catagory.
-put the qucik adds at the top
-chages the settings check boxes into switches.
-make sure all the drop downs are closed when getting in or swithcing pages.
-for the first time on a profile, make sure the suer is asked to input thier name and genral location.
-when pressing brownse books, make sure to link to that persons library not your own library.
-confiure everything to be be eaiser to use, less cluttered.
+put duplicate books in the same category.
+put the quick adds at the top
+changes the settings check boxes into switches.
+make sure all the drop downs are closed when getting in or switching pages.
+for the first time on a profile, make sure the user is asked to input their name and general location.
+when pressing browse books, make sure to link to that person's library not your own library.
+configure everything to be easier to use, less cluttered.
 make sure profile name and town or city actually save when a user logs in and out.
-make the base app way more Iphone friendly
-when looks at someoneelse library make a way to get back to your own library
+make the base app way more iPhone friendly
+when looks at someone else's library, make a way to get back to your own library
+if there is a verified email, make there a way to get a new password, if the user forgot theirs.
 ADMIN PANEL--------------------------------
-make a way to see the admin panael and add people on iphones.
-allow to remove shared librarys as an admin
 
+make a way to see the admin panel and add people on iPhones.
+allow to remove shared libraries as an admin
+make a way to get passwords back for users if password not verified
 API STUFF (IGNORE)-------------------------
+
 redo the API to use tdarr to make the camera easier/secondary ai easier.
-
-
