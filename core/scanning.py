@@ -289,7 +289,7 @@ class Scanner:
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(self.wake.wait(),timeout=1)
 
-    def enqueue(self, owner, photos, mode, library_id=None):
+    def enqueue(self, owner, photos, mode, library_id=None, shelf=""):
         with self.db() as c:
             pending = "status IN ('queued','identifying','enriching')"
             if c.execute('SELECT COUNT(*) FROM scans WHERE '+pending).fetchone()[0]>=self.settings.max_pending:
@@ -300,6 +300,7 @@ class Scanner:
             if library_id and not c.execute('SELECT 1 FROM library_members WHERE library_id=? AND user_id=?',(library_id,owner)).fetchone():
                 raise ScanError('Library access removed. Ask its manager to add you again.')
             c.execute("INSERT INTO scans(id,owner,status,enrichment_mode,created,queued_at) VALUES(?,?,'queued',?,?,?)",(identifier,owner,mode,int(time.time()),time.time()))
+            c.execute('UPDATE scans SET shelf=? WHERE id=?',(shelf,identifier))
             if library_id: c.execute('UPDATE scans SET library_id=? WHERE id=?',(library_id,identifier))
             for i,(view,image) in enumerate(photos):
                 c.execute('INSERT INTO scan_images VALUES(?,?,?,?)',(identifier,i,view,image))
