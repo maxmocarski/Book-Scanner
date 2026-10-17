@@ -1,3 +1,5 @@
+OVERLYING THEME: MAKE THIS ALL WORK ON IPHONES!!!
+
 Quality of life stuff----------------------
 make the frame more accurate, or just get rid of it
 put duplicate books in the same catagory.
@@ -8,8 +10,12 @@ for the first time on a profile, make sure the suer is asked to input thier name
 when pressing brownse books, make sure to link to that persons library not your own library.
 confiure everything to be be eaiser to use, less cluttered.
 make sure profile name and town or city actually save when a user logs in and out.
+make the base app way more Iphone friendly
 ADMIN PANEL--------------------------------
-
+make a way to see the admin panael and add people on iphones.
+allow to remove shared librarys as an admin
 
 API STUFF (IGNORE)-------------------------
 redo the API to use tdarr to make the camera easier/secondary ai easier.
+
+
