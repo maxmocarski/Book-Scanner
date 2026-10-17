@@ -11,6 +11,7 @@ when pressing brownse books, make sure to link to that persons library not your 
 confiure everything to be be eaiser to use, less cluttered.
 make sure profile name and town or city actually save when a user logs in and out.
 make the base app way more Iphone friendly
+when looks at someoneelse library make a way to get back to your own library
 ADMIN PANEL--------------------------------
 make a way to see the admin panael and add people on iphones.
 allow to remove shared librarys as an admin
