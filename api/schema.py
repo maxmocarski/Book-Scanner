@@ -39,4 +39,7 @@ def initialize(db):
                 c.execute("INSERT OR IGNORE INTO scan_images VALUES(?,0,'front',?)",(row['id'],row['image']))
             c.execute('DROP TABLE drafts')
         c.execute("UPDATE scans SET status='queued',error=NULL,expires=NULL WHERE status IN ('identifying','enriching')")
+        for table in ('books','scans'):
+            if 'shelf' not in {r['name'] for r in c.execute('PRAGMA table_info('+table+')')}:
+                c.execute("ALTER TABLE "+table+" ADD COLUMN shelf TEXT NOT NULL DEFAULT ''")
         c.execute('PRAGMA user_version=2')
