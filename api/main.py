@@ -71,7 +71,7 @@ async def expiry_loop():
     while True:
         await asyncio.sleep(60)
         await asyncio.to_thread(cleanup_expired)
-app = FastAPI(title='BookBridge', version='0.5.0', lifespan=lifespan,
+app = FastAPI(title='BookBridge', version='0.5.1', lifespan=lifespan,
               description='Private books, durable scan queue, up to three photos, Gemma + text enrichment, and friend swaps. Photos require Bearer authentication.')
 STATIC = Path(__file__).parent.parent / 'static'
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
@@ -102,6 +102,11 @@ class BookInput(Metadata):
     title: str = Field(min_length=1, max_length=500)
     author: str = Field(min_length=1, max_length=500)
     available: bool = False
+    shelf: str | None = Field(default=None, max_length=100)
+    @field_validator("shelf")
+    @classmethod
+    def clean_shelf(cls, value):
+        return value.strip() if value is not None else None
     @field_validator('title', 'author')
     @classmethod
     def no_blank(cls, v):
@@ -201,7 +206,7 @@ def public_scan(c, row):
     position = None
     if row['status']=='queued':
         position = c.execute("SELECT COUNT(*) FROM scans WHERE status='queued' AND (queued_at<? OR (queued_at=? AND seq<=?))", (row['queued_at'],row['queued_at'],row['seq'])).fetchone()[0]
-    result = {k:row[k] for k in ('id','status','enrichment_mode','created','expires','error','library_id')}
+    result = {k:row[k] for k in ('id','status','enrichment_mode','created','expires','error','library_id','shelf')}
     result['scan_id'] = identifier
     result['queue_position'] = position
     result['status_url'] = '/scans/'+identifier
@@ -212,7 +217,7 @@ def public_scan(c, row):
     return result
 @app.post('/scans', status_code=202)
 async def scan(request: Request, front: UploadFile | None = File(None), spine: UploadFile | None = File(None),
-               back: UploadFile | None = File(None), enrichment: Mode | None = Form(None), library_id: str | None = Form(None),
+               back: UploadFile | None = File(None), enrichment: Mode | None = Form(None), library_id: str | None = Form(None), shelf: str = Form(default="", max_length=100),
                cover: UploadFile | None = File(None, description='Legacy name for front. Do not combine with front.'),
                details: UploadFile | None = File(None, description='Legacy name for back. Do not combine with back.'), me=Depends(user)):
     library_id = library_id or None
@@ -246,7 +251,7 @@ async def scan(request: Request, front: UploadFile | None = File(None), spine: U
     scanner = app.state.scanner
     try:
         mode = enrichment or (preferences['review_mode'] if preferences['secondary_review'] else 'off')
-        identifier = scanner.enqueue(me['id'],photos,mode,library_id=library_id)
+        identifier = scanner.enqueue(me['id'],photos,mode,library_id=library_id,shelf=shelf.strip())
     except ScanError as e:
         fail(429,str(e))
     with db() as c:
@@ -296,8 +301,8 @@ def save(scan_id: str, body: BookInput, me=Depends(user)):
             fail(409,'Wait until the scan is ready, then review before saving.')
         identifier = uid()
         audit = {k:json.loads(row[k]) for k in ('metadata','original_metadata','corrections','sources','lookup_suggestion')}
-        c.execute('INSERT INTO books(id,owner,title,author,isbn,available,created,scan_audit,library_id) VALUES(?,?,?,?,?,?,?,?,?)',
-                  (identifier,row['owner'],body.title,body.author,isbn,int(body.available and not row['library_id']),now(),json.dumps(audit),row['library_id']))
+        c.execute('INSERT INTO books(id,owner,title,author,isbn,available,created,scan_audit,library_id,shelf) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                  (identifier,row['owner'],body.title,body.author,isbn,int(body.available and not row['library_id']),now(),json.dumps(audit),row['library_id'],row['shelf'] if body.shelf is None else body.shelf))
         c.execute('INSERT INTO book_images SELECT ?,position,view,image FROM scan_images WHERE scan_id=?', (identifier,scan_id))
         c.execute('DELETE FROM scans WHERE id=?', (scan_id,))
     return {'book_id': identifier}
@@ -352,7 +357,7 @@ def edit(book_id: str, body: BookInput, me=Depends(user)):
         community.book_edit(c,row,me)
         if locked(c,book_id):
             fail(409,'Cancel the accepted trade before editing.')
-        c.execute('UPDATE books SET title=?,author=?,isbn=?,available=? WHERE id=?', (body.title,body.author,isbn,int(body.available and not row['library_id']),book_id))
+        c.execute('UPDATE books SET title=?,author=?,isbn=?,available=?,shelf=? WHERE id=?', (body.title,body.author,isbn,int(body.available and not row['library_id']),row['shelf'] if body.shelf is None else body.shelf,book_id))
         c.execute("UPDATE trades SET status='cancelled' WHERE status='pending' AND (wanted=? OR offered=?)", (book_id,book_id))
         return public_book(c,book(c,book_id))
 @app.delete('/books/{book_id}', status_code=204)
@@ -427,8 +432,8 @@ def handoff(trade_id: str, me=Depends(user)):
         if t['sender_confirm'] and t['recipient_confirm']:
             if book(c,t['wanted'])['owner'] != t['recipient'] or book(c,t['offered'])['owner'] != t['sender']:
                 fail(409,'Ownership changed.')
-            c.execute('UPDATE books SET owner=?,available=0 WHERE id=?', (t['sender'],t['wanted']))
-            c.execute('UPDATE books SET owner=?,available=0 WHERE id=?', (t['recipient'],t['offered']))
+            c.execute("UPDATE books SET owner=?,available=0,shelf='' WHERE id=?", (t['sender'],t['wanted']))
+            c.execute("UPDATE books SET owner=?,available=0,shelf='' WHERE id=?", (t['recipient'],t['offered']))
             c.execute("UPDATE trades SET status='completed' WHERE id=?", (trade_id,))
         return dict(trade(c,trade_id,me))
 @app.get('/health')
