@@ -87,7 +87,7 @@ async function api(path, options = {}) {
   }
 
   if (response.status === 204) return null;
-  return response.json();
+  return options.responseType === 'blob' ? response.blob() : response.json();
 }
 
 async function formAction(form, action, errorId) {
@@ -161,12 +161,19 @@ function clearSession() {
   $('friend-list').replaceChildren();
   $('trade-list').replaceChildren();
   clearCommunity();
+  resetPublic();
+  state.tab='auth';
+  $('guest-signin').classList.add('active');
+  $('guest-signin').setAttribute('aria-pressed','true');
+  $('page-public').hidden=true;
+  $('guest-navigation').hidden=false;
 }
 
 async function startSession() {
   state.me = await api('/me');
   applySettings();
   $('auth').hidden = true;
+  $('guest-navigation').hidden=true;
   $('workspace').hidden = false;
   $('account').hidden = false;
   $('auth-password').value = '';
@@ -183,6 +190,10 @@ async function startSession() {
 function navigate(tab) {
   closeSections();
   state.tab = tab;
+  if (!state.me) $('auth').hidden=tab==='public';
+  $('guest-signin').classList.toggle('active',tab==='auth');
+  $('guest-signin').setAttribute('aria-pressed',String(tab==='auth'));
+  if (tab==='public') refreshPublic().catch(err=>publicError(err));
   window.scrollTo({top:0,behavior:'instant'});
   if (tab !== 'scan') stopCamera();
   document.querySelectorAll('.page').forEach(p => p.hidden = p.id !== 'page-' + tab);
@@ -197,7 +208,7 @@ function navigate(tab) {
     renderTrades();
   }
   if (tab === 'trades') renderTrades();
-  if (state.me && tab !== 'scan') refreshAll().catch(err => toast(err.message));
+  if (state.me && !['scan','public'].includes(tab)) refreshAll().catch(err => toast(err.message));
 }
 
 async function refreshAll() {
@@ -438,7 +449,7 @@ function renderQueue() {
       failed: scan.error || 'Scan failed. You can retry.'
     };
     info.append(e('p', 'muted', descriptions[scan.status]));
-    if (scan.shelf) info.append(e('p','small muted','Shelf: '+scan.shelf));
+    if (scan.shelf) info.append(e('p','small muted','Shelf: '+(scan.shelf_label || scan.shelf)));
     if (scan.duplicate) info.append(e('p','duplicate-warning',duplicateMessage(scan.duplicate)));
 
     const badge = e('span', 'badge ' + scan.status, {
@@ -488,6 +499,7 @@ function openReview(scan) {
   $('review-author').value = scan.metadata.author || '';
   $('review-isbn').value = scan.metadata.isbn || '';
   $('review-shelf').value = scan.shelf || '';
+  $('review-shelf-location').textContent = scan.shelf_label ? 'Current location: '+scan.shelf_label : '';
   $('review-available').checked = false;
   $('review-error').textContent = '';
   photoStrip($('review-photos'), scan.images);
@@ -569,18 +581,20 @@ function reserved(id) {
 
 function renderLibrary() {
   $('my-library').hidden = !state.owner;
+  $('library-export').hidden = !state.owner.startsWith('lib:');
   const friend = state.friends.find(f => f.id === state.owner);
   const shared = (state.libraries || []).find(l => 'lib:' + l.id === state.owner);
   $('library-title').textContent = shared ? shared.name : friend ? (friend.display_name || friend.username) + "’s library." : 'Your little library.';
   $('library-description').textContent = shared ? 'A shared catalog for your library members.' : friend ? 'A good book might be one swap away.' : 'Books you own, stories you can share.';
 
   const query = $('library-search').value.toLocaleLowerCase().trim();
-  const books = state.books.filter(b => (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || '', b.shelf || ''].join(' ').toLocaleLowerCase().includes(query));
+  const books = state.books.filter(b => (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || '', b.shelf_label || b.shelf || ''].join(' ').toLocaleLowerCase().includes(query));
 
   $('library-count').textContent = books.length + ' ' + (books.length === 1 ? 'book' : 'books') + (query ? ' found' : ' on the shelf');
 
   const grid = $('book-grid');
   grid.replaceChildren();
+  applyCatalogView(grid);
 
   if (state.libraryLoading) { grid.append(e('p','muted','Loading this library…')); return; }
   if (!books.length) {
@@ -590,24 +604,10 @@ function renderLibrary() {
   }
 
   const groups = groupCopies(books);
-  $('library-count').textContent = books.length + ' copies · ' + groups.length + ' editions';
+  $('library-count').textContent = groups.length + (groups.length===1?' title':' titles');
   for (const copies of groups) {
-    const book = copies[0];
-    const card = button('', 'book-card', () => copies.length > 1 ? openCopies(copies) : openBook(book));
-    const cover = e('div', 'book-cover-area');
-    cover.append(image(book.image_url, '', book.title + ' cover'));
-
-    const info = e('div', 'book-card-info');
-    info.append(e('h3', '', book.title), e('p', '', book.author));
-    const shelves = [...new Set(copies.map(copy=>copy.shelf).filter(Boolean))];
-    if (shelves.length) info.append(e('p','small muted','Shelf: '+shelves.join(' · ')));
-    if (copies.length > 1) info.append(e('span','copy-count',copies.length+' copies'));
-    info.append(e('p','small muted',book.isbn ? 'ISBN '+book.isbn : 'Edition unknown'));
-    info.append(e('span', 'badge ' + (book.available && !reserved(book.id) ? 'available' : ''), reserved(book.id) ? 'RESERVED' : book.available ? 'AVAILABLE TO TRADE' : 'ON THE SHELF'));
-
-    card.append(cover, info);
-    card.setAttribute('aria-label', book.title + ' by ' + book.author);
-    grid.append(card);
+    const book=copies[0];
+    grid.append(makeBookCard(copies,()=>copies.length>1?openCopies(copies):openBook(book),item=>image(item.image_url,'',item.title+' cover')));
   }
 }
 
@@ -621,6 +621,7 @@ function openBook(book) {
   $('book-author').value = book.author;
   $('book-isbn').value = book.isbn || '';
   $('book-shelf').value = book.shelf || '';
+  $('book-shelf-location').textContent = book.shelf_label ? 'Current location: '+book.shelf_label : '';
   $('book-available').checked = Boolean(book.available);
 
   ['book-title', 'book-author', 'book-isbn', 'book-shelf', 'book-available'].forEach(id => $(id).disabled = !own || locked);
@@ -912,6 +913,7 @@ $('accept-invite-form').addEventListener('submit', event => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) stopCamera();
+  else if (state.tab==='public') refreshPublic().catch(err=>publicError(err));
   else if (state.me && !['settings','admin'].includes(state.tab)) refreshAll().catch(() => {});
 });
 

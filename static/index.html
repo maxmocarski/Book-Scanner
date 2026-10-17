@@ -6,10 +6,12 @@
   <meta name="theme-color" content="#283d32">
   <title>BookBridge — your books, connected</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.5.1">
-  <script src="/static/app.js?v=0.5.1" defer></script>
-  <script src="/static/community.js?v=0.5.1" defer></script>
-  <script src="/static/mobile.js?v=0.5.1" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.6.1">
+  <script src="/static/app.js?v=0.6.1" defer></script>
+  <script src="/static/catalog.js?v=0.6.1" defer></script>
+  <script src="/static/community.js?v=0.6.1" defer></script>
+  <script src="/static/public.js?v=0.6.1" defer></script>
+  <script src="/static/mobile.js?v=0.6.1" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -24,6 +26,7 @@
   </header>
 
   <main>
+    <nav id="guest-navigation" class="navigation guest-navigation" aria-label="Guest navigation"><button id="guest-signin" class="active" aria-pressed="true">Sign in</button><button data-tab="public" aria-pressed="false">Libraries</button></nav>
     <!-- Authentication Section -->
     <section id="auth" class="auth-layout">
       <div class="intro">
@@ -67,6 +70,7 @@
         <button data-tab="library" aria-pressed="false">My library</button>
         <button data-tab="friends" aria-pressed="false">Friends</button>
         <button data-tab="trades" aria-pressed="false">Trades</button>
+        <button data-tab="public" aria-pressed="false">Libraries</button>
         <button data-tab="settings" aria-pressed="false">Settings</button>
       </nav>
 
@@ -81,6 +85,7 @@
         </div>
 
         <div class="scan-layout">
+          <div class="camera-column">
           <div class="camera">
             <video id="camera-video" muted playsinline autoplay aria-label="Live camera preview"></video>
             <div class="camera-placeholder" id="camera-placeholder">
@@ -100,6 +105,11 @@
             </div>
           </div>
 
+            <button id="queue-book" class="primary full" disabled>Add book to queue <span aria-hidden="true">→</span></button>
+            <p class="small muted">You can photograph the next book while this one scans.</p>
+            <p id="scan-feedback" class="feedback" role="status"></p>
+          </div>
+
           <div class="panel scan-panel">
             <h2>One book at a time.</h2>
             <p class="muted">The back or copyright page usually has the ISBN.</p>
@@ -108,10 +118,8 @@
             <button id="upload-photo" class="secondary full">Upload front photo</button>
             <label>Scan into<select id="scan-library"><option value="">My library</option></select></label>
             <label>Shelf <span class="small muted">optional</span><input id="scan-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
+            <p class="small muted">Books on each shelf are numbered automatically in scan order.</p>
             <p class="small muted">Secondary AI review can be changed in Settings.</p>
-            <button id="queue-book" class="primary full" disabled>Add book to queue <span aria-hidden="true">→</span></button>
-            <p class="small muted">You can photograph the next book while this one scans.</p>
-            <p id="scan-feedback" class="feedback" role="status"></p>
           </div>
         </div>
       </section>
@@ -139,12 +147,12 @@
             <h1 id="library-title">Your little library.</h1>
             <p id="library-description" class="muted">Books you own, stories you can share.</p>
           </div>
-          <div class="button-row"><button id="my-library" class="secondary" hidden>← My library</button><button id="library-refresh" class="secondary">Refresh</button></div>
+          <div class="button-row"><button id="my-library" class="secondary" hidden>← My library</button><button id="library-export" class="secondary" hidden>Export CSV</button><button id="library-refresh" class="secondary">Refresh</button></div>
         </div>
 
         <details class="panel filters"><summary>Search and filter books</summary><div class="library-tools">
           <label class="sr-only" for="library-search">Search books</label>
-          <input id="library-search" type="search" placeholder="Search title, author or ISBN">
+          <input id="library-search" type="search" placeholder="Search title, author, ISBN or shelf">
 
           <label class="sr-only" for="library-owner">Choose library</label>
           <select id="library-owner">
@@ -155,7 +163,7 @@
             <input id="available-only" type="checkbox"> Available to trade
           </label>
         </div>
-
+        <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Cards</button><button type="button" data-catalog-view="list" aria-pressed="false">List · no pictures</button></div>
         </details>
         <p id="library-count" class="muted small"></p>
         <div id="book-grid" class="book-grid"></div>
@@ -245,15 +253,24 @@
         <details class="panel"><summary>Popular on BookBridge</summary><p class="muted small">Books on at least three discoverable personal shelves. These are community favorites, not a global bestseller list.</p><div id="popular-books"></div></details>
       </section>
       <section id="page-admin" class="page" hidden><h1>Admin panel</h1><button data-tab="settings" class="secondary">← Settings</button><div id="admin-stats" class="stats-grid"></div>
-        <details class="panel"><summary>Create a shared library</summary><form id="create-library-form"><label>Library name<input id="new-library-name" required maxlength="100"></label><button class="primary">Create library</button></form></details>
+        <details class="panel"><summary>Create a shared library</summary><form id="create-library-form"><label>Library name<input id="new-library-name" required maxlength="100"></label><label class="check"><input id="new-library-public" type="checkbox" role="switch"> Public library</label><p class="small muted">Public catalogs and book photos can be viewed by anyone without signing in. Leave off for a private library.</p><button class="primary">Create library</button></form></details>
         <details class="panel"><summary>Accounts</summary><form id="admin-user-search"><label>Find username<input id="admin-user-query" maxlength="100"></label><button class="secondary">Search</button></form><div id="admin-users"></div></details>
         <details class="panel"><summary>Manage shared libraries</summary><div id="admin-libraries"></div></details>
         <details class="panel"><summary>Remove a book</summary><form id="admin-book-search"><label>Title or book ID<input id="admin-book-query" maxlength="500"></label><button class="secondary">Search</button></form><div id="admin-books"></div></details>
         <details class="panel"><summary>Activity and bot signals</summary><p class="muted">Repeated requests and filled bot traps are signals to investigate, not proof someone is a bot.</p><div id="admin-events"></div></details>
       </section>
     </div>
+    <section id="page-public" class="page" hidden>
+      <div class="page-heading"><div><h1 id="public-heading">Public libraries</h1><p id="public-description" class="muted">Browse shared collections. No account needed.</p></div><button id="public-back" class="secondary" hidden>← All public libraries</button></div>
+      <details class="panel filters" id="public-filters"><summary>Search and filter libraries</summary>
+      <form id="public-search-form" class="button-row"><label class="sr-only" for="public-search">Search libraries or books</label><input id="public-search" type="search" maxlength="100" placeholder="Search public libraries"><button class="secondary">Search</button></form>
+      <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Cards</button><button type="button" data-catalog-view="list" aria-pressed="false">List · no pictures</button></div>
+      </details>
+      <p id="public-status" class="muted" role="status"></p><div id="public-results" class="book-grid"></div><button id="public-more" class="secondary" hidden>Load more</button>
+    </section>
   </main>
 
+  <dialog id="public-book-dialog" aria-labelledby="public-book-title"><div class="dialog-heading"><h2 id="public-book-title"></h2><button class="icon-button" data-close="public-book-dialog" aria-label="Close book">×</button></div><label id="public-copy-label" hidden>Copy<select id="public-copy"></select></label><p id="public-book-copies" class="small muted"></p><p id="public-book-author"></p><p id="public-book-isbn" class="small muted"></p><p id="public-book-shelf" class="small muted"></p><div id="public-book-photos" class="photo-strip"></div></dialog>
   <!-- Dialogs -->
   <dialog id="review-dialog" aria-labelledby="review-title">
     <div class="dialog-heading">
@@ -277,6 +294,7 @@
         <input id="review-isbn" maxlength="32" placeholder="Leave blank if unknown">
       </label>
       <label>Shelf <span class="small muted">optional</span><input id="review-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
+      <p id="review-shelf-location" class="small muted"></p>
       <div id="review-notes" class="review-notes"></div>
       <label class="check">
         <input id="review-available" type="checkbox"> Available to trade with friends
@@ -305,6 +323,7 @@
         <input id="book-isbn" maxlength="32">
       </label>
       <label>Shelf <span class="small muted">optional</span><input id="book-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
+      <p id="book-shelf-location" class="small muted"></p>
       <label class="check" id="book-available-label">
         <input id="book-available" type="checkbox"> Available to trade
       </label>

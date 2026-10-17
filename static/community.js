@@ -126,13 +126,28 @@ function renderSharedLibraries(libraries = state.libraries, root = $('shared-lib
   if (!libraries.length) root.append(e('p','muted','No shared libraries yet. Ask a library manager to add your username.'));
   for (const library of libraries) {
     const card = e('details','library-settings');
-    card.append(e('summary','',library.name+' · '+library.books+' books'));
+    const heading=e('summary','library-card-summary');
+    heading.append(e('span','library-name',library.name),e('span','library-visibility',library.is_public?'Public':'Private'));
+    card.append(heading,e('p','small muted',library.books+' saved books'));
     if (state.libraries.some(memberLibrary=>memberLibrary.id===library.id)) {
+    card.append(button('Export CSV','secondary',()=>exportLibrary(library)));
     card.append(button('Browse catalog','secondary',() => openLibrary('lib:'+library.id)));
     card.append(button('Scan into library','secondary',() => {$('scan-library').value=library.id; navigate('scan');}));
     card.append(button('Open shared queue','secondary',() => {$('queue-library').value=library.id; navigate('queue');}));
     }
     if (library.owner === state.me.id || state.me.is_admin) {
+      const visibilityLabel=e('label','check');
+      const visibility=e('input');visibility.type='checkbox';visibility.setAttribute('role','switch');visibility.checked=Boolean(library.is_public);
+      visibilityLabel.append(visibility,document.createTextNode('Public library'));
+      card.append(visibilityLabel,e('p','small muted','Public means anyone can browse the catalog and book photos without signing in.'));
+      visibility.addEventListener('change',async()=>{
+        const previous=Boolean(library.is_public);
+        if(visibility.checked && !confirm('Make this library’s saved books, shelf locations, and photos visible to everyone?')){visibility.checked=previous;return;}
+        visibility.disabled=true;
+        try{await api('/libraries/'+library.id+'/visibility',{method:'PATCH',body:{is_public:visibility.checked}});library.is_public=visibility.checked;heading.querySelector('.library-visibility').textContent=visibility.checked?'Public':'Private';toast(visibility.checked?'Library is public.':'Library is private.');}
+        catch(err){visibility.checked=previous;toast(err.message);}
+        finally{visibility.disabled=false;}
+      });
       const form = e('form','member-form');
       const label = e('label','','Give scanning permission to a username');
       const input = e('input'); input.required=true; input.pattern='[a-zA-Z0-9_]{3,32}'; input.placeholder='Existing username';
@@ -218,8 +233,8 @@ $('reading-form').addEventListener('submit',event=>{
 });
 $('create-library-form').addEventListener('submit',event=>{
   event.preventDefault(); formAction(event.currentTarget,async()=>{
-    await api('/libraries',{method:'POST',body:{name:$('new-library-name').value}});
-    $('new-library-name').value=''; navigate('settings'); toast('Library created. Open it below to add members.');
+    await api('/libraries',{method:'POST',body:{name:$('new-library-name').value,is_public:$('new-library-public').checked}});
+    $('new-library-public').checked=false; $('new-library-name').value=''; navigate('settings'); toast('Library created. Open it below to add members.');
   });
 });
 $('admin-user-search').addEventListener('submit',event=>{
@@ -252,3 +267,21 @@ $('admin-book-search').addEventListener('submit',event=>{
     });
   });
 });
+
+async function exportLibrary(library) {
+  const blob = await api('/libraries/'+encodeURIComponent(library.id)+'/export.csv',{responseType:'blob'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = (library.name.replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-+|-+$/g,'') || 'shared-library')+'-books.csv';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  toast('CSV ready. Check your browser downloads.');
+}
+$('library-export').addEventListener('click',()=>formAction($('library-export').parentElement,async()=>{
+  const library=state.libraries.find(item=>'lib:'+item.id===state.owner);
+  if(!library)throw new Error('Open a shared library first.');
+  await exportLibrary(library);
+}));
