@@ -134,6 +134,7 @@ function clearSession() {
   state.poll = null;
   stopCamera();
   clearPhotos();
+  $('scan-shelf').value = '';
   closeDialogs();
   state.photoCache.forEach(p => {
     if (p.url) URL.revokeObjectURL(p.url);
@@ -437,6 +438,7 @@ function renderQueue() {
       failed: scan.error || 'Scan failed. You can retry.'
     };
     info.append(e('p', 'muted', descriptions[scan.status]));
+    if (scan.shelf) info.append(e('p','small muted','Shelf: '+scan.shelf));
     if (scan.duplicate) info.append(e('p','duplicate-warning',duplicateMessage(scan.duplicate)));
 
     const badge = e('span', 'badge ' + scan.status, {
@@ -485,6 +487,7 @@ function openReview(scan) {
   $('review-book-title').value = scan.metadata.title || '';
   $('review-author').value = scan.metadata.author || '';
   $('review-isbn').value = scan.metadata.isbn || '';
+  $('review-shelf').value = scan.shelf || '';
   $('review-available').checked = false;
   $('review-error').textContent = '';
   photoStrip($('review-photos'), scan.images);
@@ -546,6 +549,7 @@ function reviewedBody(prefix) {
     title: $(prefix + '-title').value.trim(),
     author: $(prefix === 'review-book' ? 'review-author' : 'book-author').value.trim(),
     isbn: $(prefix === 'review-book' ? 'review-isbn' : 'book-isbn').value.trim() || null,
+    shelf: $(prefix === 'review-book' ? 'review-shelf' : 'book-shelf').value.trim(),
     available: $(prefix === 'review-book' ? 'review-available' : 'book-available').checked
   };
 }
@@ -571,7 +575,7 @@ function renderLibrary() {
   $('library-description').textContent = shared ? 'A shared catalog for your library members.' : friend ? 'A good book might be one swap away.' : 'Books you own, stories you can share.';
 
   const query = $('library-search').value.toLocaleLowerCase().trim();
-  const books = state.books.filter(b => (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || ''].join(' ').toLocaleLowerCase().includes(query));
+  const books = state.books.filter(b => (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || '', b.shelf || ''].join(' ').toLocaleLowerCase().includes(query));
 
   $('library-count').textContent = books.length + ' ' + (books.length === 1 ? 'book' : 'books') + (query ? ' found' : ' on the shelf');
 
@@ -595,6 +599,8 @@ function renderLibrary() {
 
     const info = e('div', 'book-card-info');
     info.append(e('h3', '', book.title), e('p', '', book.author));
+    const shelves = [...new Set(copies.map(copy=>copy.shelf).filter(Boolean))];
+    if (shelves.length) info.append(e('p','small muted','Shelf: '+shelves.join(' · ')));
     if (copies.length > 1) info.append(e('span','copy-count',copies.length+' copies'));
     info.append(e('p','small muted',book.isbn ? 'ISBN '+book.isbn : 'Edition unknown'));
     info.append(e('span', 'badge ' + (book.available && !reserved(book.id) ? 'available' : ''), reserved(book.id) ? 'RESERVED' : book.available ? 'AVAILABLE TO TRADE' : 'ON THE SHELF'));
@@ -614,9 +620,10 @@ function openBook(book) {
   $('book-title').value = book.title;
   $('book-author').value = book.author;
   $('book-isbn').value = book.isbn || '';
+  $('book-shelf').value = book.shelf || '';
   $('book-available').checked = Boolean(book.available);
 
-  ['book-title', 'book-author', 'book-isbn', 'book-available'].forEach(id => $(id).disabled = !own || locked);
+  ['book-title', 'book-author', 'book-isbn', 'book-shelf', 'book-available'].forEach(id => $(id).disabled = !own || locked);
   $('book-own-actions').hidden = !own;
   $('book-own-actions').querySelector('.primary').disabled = locked;
   $('delete-book').disabled = locked;
@@ -798,6 +805,7 @@ $('queue-book').addEventListener('click', async () => {
     for (const view of Object.keys(views)) {
       if (state.photos[view]) form.append(view, state.photos[view].blob, view + '.jpg');
     }
+    form.append('shelf', $('scan-shelf').value.trim());
     form.append('enrichment', state.me.secondary_review ? state.me.review_mode : 'off');
     if ($('scan-library').value) form.append('library_id', $('scan-library').value);
     await api('/scans', { method: 'POST', body: form });
