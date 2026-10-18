@@ -139,4 +139,5 @@ def install(app,m):
             c.execute('DELETE FROM scans WHERE library_id=?',(library_id,))
             c.execute('DELETE FROM library_members WHERE library_id=?',(library_id,))
             c.execute('DELETE FROM libraries WHERE id=?',(library_id,))
+            c.execute('DELETE FROM shelf_counters WHERE scope=?',('library:'+library_id,))
             c.execute('INSERT INTO admin_audit(created,admin,action,target) VALUES(?,?,?,?)',(m.now(),me['id'],'delete_library',library_id))
