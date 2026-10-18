@@ -6,12 +6,13 @@
   <meta name="theme-color" content="#283d32">
   <title>BookBridge — your books, connected</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.6.1">
-  <script src="/static/app.js?v=0.6.1" defer></script>
-  <script src="/static/catalog.js?v=0.6.1" defer></script>
-  <script src="/static/community.js?v=0.6.1" defer></script>
-  <script src="/static/public.js?v=0.6.1" defer></script>
-  <script src="/static/mobile.js?v=0.6.1" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.7.0">
+  <script src="/static/app.js?v=0.7.0" defer></script>
+  <script src="/static/catalog.js?v=0.7.0" defer></script>
+  <script src="/static/community.js?v=0.7.0" defer></script>
+  <script src="/static/public.js?v=0.7.0" defer></script>
+  <script src="/static/bookshelf.js?v=0.7.0" defer></script>
+  <script src="/static/mobile.js?v=0.7.0" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -64,23 +65,23 @@
 
     <!-- Workspace Section -->
     <div id="workspace" hidden>
+      <div id="library-dock" class="library-dock" hidden><label for="library-owner">Which library?</label><select id="library-owner"><option value="">My library</option></select></div>
       <nav class="navigation" aria-label="Main navigation">
-        <button data-tab="scan" class="active" aria-pressed="true">Scan a book</button>
-        <button data-tab="queue" aria-pressed="false">Book queue <span id="queue-count" class="count" hidden>0</span></button>
-        <button data-tab="library" aria-pressed="false">My library</button>
-        <button data-tab="friends" aria-pressed="false">Friends</button>
-        <button data-tab="trades" aria-pressed="false">Trades</button>
-        <button data-tab="public" aria-pressed="false">Libraries</button>
-        <button data-tab="settings" aria-pressed="false">Settings</button>
+        <button data-tab="library" aria-pressed="true">My Library</button><button data-tab="scan" aria-pressed="false">Scan</button><button data-tab="friends" aria-pressed="false">Friends</button><button data-tab="settings" aria-pressed="false">Settings</button>
       </nav>
+      <nav id="scan-tabs" class="section-tabs" aria-label="Scan and review" hidden><button data-tab="scan">Scan</button><button data-tab="queue">Book queue <span id="queue-count" class="count" hidden>0</span></button></nav>
+      <nav id="friends-tabs" class="section-tabs" aria-label="Friends and trades" hidden><button data-tab="friends">Friends</button><button data-tab="trades">Trades</button></nav>
 
       <!-- Scan Page -->
       <section id="page-scan" class="page">
         <div class="page-heading">
           <div>
-            <span class="eyebrow">ONE BOOK, UP TO THREE ANGLES</span>
-            <h1>Meet your next shelf entry.</h1>
-            <p class="muted">Capture the front. Add the spine and back for a clearer match.</p>
+            <span class="eyebrow">ADD TO YOUR LIBRARY</span>
+            <h1>Scan your books</h1>
+            <p id="scan-help" class="muted">Photograph the cover. The spine and back are optional.</p>
+            <label>Scan mode<select id="scan-mode-kind"><option value="single">One book</option><option value="shelf">Shelf spines · up to 5</option></select></label>
+            <div id="shelf-photo-options" hidden><label>Books in photo<select id="shelf-book-count"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label></div>
+            <p id="scan-limit" class="scan-warning" hidden>No more than 5 books per photo. Spine reading can miss text or mix books. Count the visible books and review each result. Photograph unclear books individually.</p>
           </div>
         </div>
 
@@ -111,12 +112,12 @@
           </div>
 
           <div class="panel scan-panel">
-            <h2>One book at a time.</h2>
-            <p class="muted">The back or copyright page usually has the ISBN.</p>
+            <h2>Photos and shelf</h2>
+            <p class="muted">A shelf name is optional. Books without one go into Miscellaneous.</p>
             <div id="photo-slots" class="photo-slots"></div>
             <input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
             <button id="upload-photo" class="secondary full">Upload front photo</button>
-            <label>Scan into<select id="scan-library"><option value="">My library</option></select></label>
+            <label hidden>Scan into<select id="scan-library"><option value="">My library</option></select></label>
             <label>Shelf <span class="small muted">optional</span><input id="scan-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
             <p class="small muted">Books on each shelf are numbered automatically in scan order.</p>
             <p class="small muted">Secondary AI review can be changed in Settings.</p>
@@ -134,8 +135,8 @@
           </div>
           <button id="queue-refresh" class="secondary">Refresh</button>
         </div>
-        <div class="button-row"><label>Queue<select id="queue-library"><option value="">My library</option></select></label><button id="bulk-review" class="secondary">Accept all ready</button></div>
-        <p class="small muted">Accept all ready saves the current finished scans without checking their fields. AI can make mistakes; you can edit saved books afterward.</p>
+        <div class="button-row"><label hidden>Queue<select id="queue-library"><option value="">My library</option></select></label><button id="bulk-review" class="secondary">Accept all ready</button></div>
+        <p class="small muted">AI can misread books. Review each result for accuracy, or accept all ready results.</p>
         <div id="queue-list" class="queue-list"></div>
       </section>
 
@@ -144,7 +145,7 @@
         <div class="page-heading">
           <div>
             <span class="eyebrow">ALL IN ONE PLACE</span>
-            <h1 id="library-title">Your little library.</h1>
+            <h1 id="library-title">My bookshelf</h1>
             <p id="library-description" class="muted">Books you own, stories you can share.</p>
           </div>
           <div class="button-row"><button id="my-library" class="secondary" hidden>← My library</button><button id="library-export" class="secondary" hidden>Export CSV</button><button id="library-refresh" class="secondary">Refresh</button></div>
@@ -154,16 +155,12 @@
           <label class="sr-only" for="library-search">Search books</label>
           <input id="library-search" type="search" placeholder="Search title, author, ISBN or shelf">
 
-          <label class="sr-only" for="library-owner">Choose library</label>
-          <select id="library-owner">
-            <option value="">My library</option>
-          </select>
 
           <label class="check">
             <input id="available-only" type="checkbox"> Available to trade
           </label>
         </div>
-        <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Cards</button><button type="button" data-catalog-view="list" aria-pressed="false">List · no pictures</button></div>
+        <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Bookshelf</button><button type="button" data-catalog-view="list" aria-pressed="false">List · no pictures</button></div>
         </details>
         <p id="library-count" class="muted small"></p>
         <div id="book-grid" class="book-grid"></div>
@@ -174,7 +171,7 @@
         <div class="page-heading">
           <div>
             <span class="eyebrow">BETTER WHEN SHARED</span>
-            <h1>A good read, passed on.</h1>
+            <h1>Friends</h1>
             <p class="muted">Invite people you know, browse their books, and arrange a swap.</p>
           </div>
           <button id="friends-refresh" class="secondary">Refresh</button>
@@ -264,13 +261,13 @@
       <div class="page-heading"><div><h1 id="public-heading">Public libraries</h1><p id="public-description" class="muted">Browse shared collections. No account needed.</p></div><button id="public-back" class="secondary" hidden>← All public libraries</button></div>
       <details class="panel filters" id="public-filters"><summary>Search and filter libraries</summary>
       <form id="public-search-form" class="button-row"><label class="sr-only" for="public-search">Search libraries or books</label><input id="public-search" type="search" maxlength="100" placeholder="Search public libraries"><button class="secondary">Search</button></form>
-      <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Cards</button><button type="button" data-catalog-view="list" aria-pressed="false">List · no pictures</button></div>
+      <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Bookshelf</button><button type="button" data-catalog-view="list" aria-pressed="false">List · no pictures</button></div>
       </details>
       <p id="public-status" class="muted" role="status"></p><div id="public-results" class="book-grid"></div><button id="public-more" class="secondary" hidden>Load more</button>
     </section>
   </main>
 
-  <dialog id="public-book-dialog" aria-labelledby="public-book-title"><div class="dialog-heading"><h2 id="public-book-title"></h2><button class="icon-button" data-close="public-book-dialog" aria-label="Close book">×</button></div><label id="public-copy-label" hidden>Copy<select id="public-copy"></select></label><p id="public-book-copies" class="small muted"></p><p id="public-book-author"></p><p id="public-book-isbn" class="small muted"></p><p id="public-book-shelf" class="small muted"></p><div id="public-book-photos" class="photo-strip"></div></dialog>
+  <dialog id="public-book-dialog" aria-labelledby="public-book-title"><div class="dialog-heading"><h2 id="public-book-title"></h2><span id="public-book-copies" class="copy-corner"></span><button class="icon-button" data-close="public-book-dialog" aria-label="Close book">×</button></div><label id="public-copy-label" hidden>Copy<select id="public-copy"></select></label><p id="public-book-author"></p><p id="public-book-isbn" class="small muted"></p><p id="public-book-shelf" class="small muted"></p><div id="public-book-photos" class="photo-strip"></div></dialog>
   <!-- Dialogs -->
   <dialog id="review-dialog" aria-labelledby="review-title">
     <div class="dialog-heading">
@@ -306,7 +303,7 @@
 
   <dialog id="book-dialog" aria-labelledby="book-dialog-title">
     <div class="dialog-heading">
-      <h2 id="book-dialog-title">Book details</h2>
+      <h2 id="book-dialog-title">Book details</h2><span id="book-copy-count" class="copy-corner"></span>
       <button class="icon-button" data-close="book-dialog" aria-label="Close book details">×</button>
     </div>
 
@@ -364,7 +361,7 @@
     <form id="profile-form"><label>First name<input id="profile-first" autocomplete="given-name" maxlength="40" required></label><label>Last name<input id="profile-last" autocomplete="family-name" maxlength="40" required></label><label>Town or city<input id="profile-town" autocomplete="address-level2" maxlength="100"><small class="muted">Optional. No GPS location is collected.</small></label><p class="muted small">Discovery stays off unless you turn it on in Settings.</p><button class="primary full">Save and continue</button><p id="profile-error" class="inline-error" role="alert"></p></form>
     <button id="profile-signout" type="button" class="text-button">Sign out</button>
   </dialog>
-  <dialog id="copies-dialog" aria-labelledby="copies-title"><div class="dialog-heading"><h2 id="copies-title">Choose a copy</h2><button class="icon-button" data-close="copies-dialog" aria-label="Close copies">×</button></div><div id="copies-list"></div></dialog>
+  <dialog id="copies-dialog" aria-labelledby="copies-title"><div class="dialog-heading"><h2 id="copies-title">Choose a copy</h2><span id="copies-count" class="copy-corner"></span><button class="icon-button" data-close="copies-dialog" aria-label="Close copies">×</button></div><p id="copies-author" class="muted"></p><div id="copies-photos" class="photo-strip"></div><div id="copies-list"></div></dialog>
   <dialog id="recovery-dialog" aria-labelledby="recovery-title"><div class="dialog-heading"><h2 id="recovery-title">Reset your password</h2><button class="icon-button" data-close="recovery-dialog" aria-label="Close password reset">×</button></div>
     <form id="recovery-request"><label>Username<input id="recovery-username" autocomplete="username" pattern="[a-zA-Z0-9_]{3,32}" required></label><button class="secondary full">Email me a reset code</button></form><p class="muted small">No verified email? Ask an admin for a temporary code, then enter it below.</p><p id="recovery-feedback" role="status"></p>
     <form id="recovery-finish"><label>Reset code<input id="recovery-code" autocomplete="off" autocapitalize="none" spellcheck="false" required></label><label>New password<input id="recovery-password" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><label>Confirm password<input id="recovery-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><button class="primary full">Set new password</button><p id="recovery-error" class="inline-error" role="alert"></p></form>

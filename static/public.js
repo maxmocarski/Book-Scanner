@@ -40,7 +40,9 @@ function renderPublic(){
   $('public-description').textContent=selected?'Public catalog · viewing only':'Browse shared collections. No account needed.';
   $('public-status').textContent=publicCatalog.items.length ? publicCatalog.items.length+(selected?(publicCatalog.items.length===1?' book loaded':' books loaded'):(publicCatalog.items.length===1?' library loaded':' libraries loaded')) : selected?'No saved books match your search.':'No public libraries match your search.';
   $('public-more').hidden=publicCatalog.next===null;
-  const entries=selected?groupCopies(publicCatalog.items):publicCatalog.items;
+  root.classList.remove('bookshelf-mode');
+  if(selected){renderBookshelf(root,groupCopies(publicCatalog.items),openPublicCopies);return;}
+  const entries=publicCatalog.items;
   for(const entry of entries){
     const copies=selected?entry:[];
     const item=selected?copies[0]:entry;

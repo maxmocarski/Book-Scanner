@@ -25,11 +25,14 @@ function groupCopies(books) {
 }
 
 function openCopies(copies) {
-  $('copies-title').textContent=copies[0].title+' · '+copies.length+' copies';
+  $('copies-title').textContent=copies[0].title;
+  $('copies-count').textContent=copies.length+' copies';
+  $('copies-author').textContent=copies[0].author;
+  photoStrip($('copies-photos'),copies[0].images);
   $('copies-list').replaceChildren();
   copies.forEach((book,index)=>{
     const row=e('div','compact-row');
-    row.append(e('span','','Copy '+(index+1)+(book.shelf ? ' · '+book.shelf : '')+' · '+(reserved(book.id)?'Reserved':book.available?'Available to trade':'On the shelf')),
+    row.append(e('span','','Copy '+(index+1)+(book.shelf ? ' · '+(book.shelf_label || book.shelf) : '')+' · '+(reserved(book.id)?'Reserved':book.available?'Available to trade':'On the shelf')),
       button('Open copy '+(index+1),'secondary',()=>{$('copies-dialog').close();openBook(book);}));
     $('copies-list').append(row);
   });

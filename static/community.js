@@ -132,8 +132,8 @@ function renderSharedLibraries(libraries = state.libraries, root = $('shared-lib
     if (state.libraries.some(memberLibrary=>memberLibrary.id===library.id)) {
     card.append(button('Export CSV','secondary',()=>exportLibrary(library)));
     card.append(button('Browse catalog','secondary',() => openLibrary('lib:'+library.id)));
-    card.append(button('Scan into library','secondary',() => {$('scan-library').value=library.id; navigate('scan');}));
-    card.append(button('Open shared queue','secondary',() => {$('queue-library').value=library.id; navigate('queue');}));
+    card.append(button('Scan into library','secondary',() => {state.owner='lib:'+library.id;$('scan-library').value=library.id; navigate('scan');}));
+    card.append(button('Open shared queue','secondary',() => {state.owner='lib:'+library.id;$('queue-library').value=library.id; navigate('queue');}));
     }
     if (library.owner === state.me.id || state.me.is_admin) {
       const visibilityLabel=e('label','check');

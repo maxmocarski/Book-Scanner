@@ -135,6 +135,7 @@ function clearSession() {
   stopCamera();
   clearPhotos();
   $('scan-shelf').value = '';
+  $('scan-mode-kind').value='single';$('shelf-photo-options').hidden=true;$('scan-limit').hidden=true;
   closeDialogs();
   state.photoCache.forEach(p => {
     if (p.url) URL.revokeObjectURL(p.url);
@@ -150,6 +151,7 @@ function clearSession() {
   state.owner = '';
   sessionStorage.removeItem('bookbridge-token');
   $('workspace').hidden = true;
+  $('library-dock').hidden=true;
   $('account').hidden = true;
   $('auth').hidden = false;
   $('auth-password').value = '';
@@ -178,7 +180,7 @@ async function startSession() {
   $('account').hidden = false;
   $('auth-password').value = '';
   state.owner = '';
-  navigate('scan');
+  navigate('library');
   await refreshAll();
   if (!state.me.profile_complete) showProfileSetup();
   clearInterval(state.poll);
@@ -198,9 +200,13 @@ function navigate(tab) {
   if (tab !== 'scan') stopCamera();
   document.querySelectorAll('.page').forEach(p => p.hidden = p.id !== 'page-' + tab);
   document.querySelectorAll('[data-tab]').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === tab);
-    b.setAttribute('aria-pressed', String(b.dataset.tab === tab));
+    b.classList.toggle('active', b.dataset.tab === tab || b.closest('.navigation') && ((b.dataset.tab==='scan' && tab==='queue') || (b.dataset.tab==='friends' && tab==='trades')));
+    b.setAttribute('aria-pressed', String(Boolean(b.dataset.tab === tab || b.closest('.navigation') && ((b.dataset.tab==='scan' && tab==='queue') || (b.dataset.tab==='friends' && tab==='trades')))));
   });
+  if(['scan','queue'].includes(tab) && state.owner && !state.owner.startsWith('lib:'))state.owner='';
+  syncLibraryDock();
+  if(tab==='scan'){$('scan-library').value=state.owner.startsWith('lib:')?state.owner.slice(4):'';}
+  if(tab==='queue')$('queue-library').value=state.owner.startsWith('lib:')?state.owner.slice(4):'';
   if (tab === 'queue') renderQueue();
   if (tab === 'library') renderLibrary();
   if (tab === 'friends') {
@@ -312,7 +318,11 @@ function renderPhotos() {
   const root = $('photo-slots');
   root.replaceChildren();
 
-  for (const view of Object.keys(views)) {
+  $('scan-mode-kind').disabled=state.busyUpload;
+  $('shelf-book-count').disabled=state.busyUpload;
+  const shelfPhoto=$('scan-mode-kind').value==='shelf';
+  $('camera-video').style.objectFit=shelfPhoto?'contain':'cover';
+  for (const view of (shelfPhoto?['front']:Object.keys(views))) {
     const wrap = e('div', 'photo-slot' + (view === state.view ? ' active' : ''));
     const choice = button('', 'photo-choice', () => {
       state.view = view;
@@ -331,7 +341,7 @@ function renderPhotos() {
       choice.append(e('span', 'plus', '+'));
     }
 
-    choice.append(e('span', '', views[view] + (view === 'front' ? ' · required' : '')));
+    choice.append(e('span', '', shelfPhoto?'Shelf photo':views[view] + (view === 'front' ? ' · required' : '')));
     wrap.append(choice);
 
     if (photo) {
@@ -346,8 +356,8 @@ function renderPhotos() {
     root.append(wrap);
   }
 
-  $('upload-photo').textContent = 'Upload ' + state.view + ' photo';
-  $('camera-view').textContent = state.view === 'front' ? 'Front cover' : views[state.view];
+  $('upload-photo').textContent = shelfPhoto?'Upload shelf photo':'Upload ' + state.view + ' photo';
+  $('camera-view').textContent = shelfPhoto?'Shelf photo':state.view === 'front' ? 'Front cover' : views[state.view];
   $('queue-book').disabled = !state.photos.front || state.busyUpload;
 }
 
@@ -376,7 +386,7 @@ async function setPhoto(file, view) {
 
   if (state.photos[view]) URL.revokeObjectURL(state.photos[view].url);
   state.photos[view] = { blob, url: URL.createObjectURL(blob) };
-  state.view = Object.keys(views).find(v => !state.photos[v]) || view;
+  state.view = $('scan-mode-kind').value==='shelf'?'front':Object.keys(views).find(v => !state.photos[v]) || view;
   renderPhotos();
 }
 
@@ -433,13 +443,13 @@ function renderQueue() {
 
   for (const scan of [...queueScans].sort((a, b) => {
     const order = { ready: 0, failed: 1, identifying: 2, enriching: 2, queued: 3 };
-    return order[a.status] - order[b.status] || a.created - b.created;
+    return order[a.status] - order[b.status] || a.created - b.created || (a.batch_id && a.batch_id===b.batch_id ? a.batch_position-b.batch_position : 0);
   })) {
     const row = e('article', 'queue-card');
-    if (scan.images[0]) row.append(image(scan.images[0].url, 'queue-cover', 'Scanned front cover'));
+    if (scan.images[0]) row.append(image(scan.images[0].url, 'queue-cover', scan.scan_mode==='spine'?'Book spine':'Book photo'));
 
     const info = e('div', 'queue-info');
-    info.append(e('h3', '', scan.metadata.title || scan.original_metadata.title || 'Book scan'));
+    info.append(e('h3', '', scan.metadata.title || scan.original_metadata.title || (scan.scan_mode==='shelf'?'Shelf photo · '+scan.book_count+' books':'Book scan')));
 
     const descriptions = {
       queued: 'Waiting' + (scan.queue_position ? ' · position ' + scan.queue_position : ''),
@@ -449,6 +459,10 @@ function renderQueue() {
       failed: scan.error || 'Scan failed. You can retry.'
     };
     info.append(e('p', 'muted', descriptions[scan.status]));
+    if(scan.scan_mode==='spine'){
+      info.append(e('p','small muted','Shelf photo · book '+scan.batch_position+' from left'));
+      if(scan.status==='ready' && (!scan.metadata.title || !scan.metadata.author || scan.warnings.some(w=>w.includes('marked this spine unclear'))))info.append(e('p','duplicate-warning','Unclear spine · check the title and author.'));
+    }
     if (scan.shelf) info.append(e('p','small muted','Shelf: '+(scan.shelf_label || scan.shelf)));
     if (scan.duplicate) info.append(e('p','duplicate-warning',duplicateMessage(scan.duplicate)));
 
@@ -572,7 +586,9 @@ function renderOwnerOptions() {
   select.replaceChildren(new Option('My library', ''));
   state.friends.filter(f => !f.private_library && !state.me.private_library).forEach(f => select.add(new Option((f.display_name || f.username) + "’s library", f.id)));
   (state.libraries || []).forEach(l => select.add(new Option(l.name + ' · shared', 'lib:' + l.id)));
-  select.value = state.owner;
+  select.add(new Option('Browse public libraries','__public__'));
+  select.value = state.tab==='public'?'__public__':state.owner;
+  syncLibraryDock();
 }
 
 function reserved(id) {
@@ -584,8 +600,8 @@ function renderLibrary() {
   $('library-export').hidden = !state.owner.startsWith('lib:');
   const friend = state.friends.find(f => f.id === state.owner);
   const shared = (state.libraries || []).find(l => 'lib:' + l.id === state.owner);
-  $('library-title').textContent = shared ? shared.name : friend ? (friend.display_name || friend.username) + "’s library." : 'Your little library.';
-  $('library-description').textContent = shared ? 'A shared catalog for your library members.' : friend ? 'A good book might be one swap away.' : 'Books you own, stories you can share.';
+  $('library-title').textContent = shared ? shared.name : friend ? (friend.display_name || friend.username) + "’s library." : 'My bookshelf';
+  $('library-description').textContent = shared ? 'Shared bookshelf.' : friend ? 'Books shared with you.' : 'Choose a book to view its details.';
 
   const query = $('library-search').value.toLocaleLowerCase().trim();
   const books = state.books.filter(b => (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || '', b.shelf_label || b.shelf || ''].join(' ').toLocaleLowerCase().includes(query));
@@ -605,14 +621,13 @@ function renderLibrary() {
 
   const groups = groupCopies(books);
   $('library-count').textContent = groups.length + (groups.length===1?' title':' titles');
-  for (const copies of groups) {
-    const book=copies[0];
-    grid.append(makeBookCard(copies,()=>copies.length>1?openCopies(copies):openBook(book),item=>image(item.image_url,'',item.title+' cover')));
-  }
+  renderBookshelf(grid,groups,copies=>copies.length>1?openCopies(copies):openBook(copies[0]));
 }
 
 function openBook(book) {
   state.book = book;
+  const count=groupCopies(state.books).find(group=>group.some(copy=>copy.id===book.id))?.length || 1;
+  $('book-copy-count').textContent=count+(count===1?' copy':' copies');
   const shared = (state.libraries || []).find(l => l.id === book.library_id);
   const own = book.owner === state.me.id || shared?.owner === state.me.id;
   const locked = reserved(book.id);
@@ -777,7 +792,7 @@ $('logout').addEventListener('click', async () => {
   toast('Signed out.');
 });
 
-document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => b.dataset.tab === 'library' ? openLibrary('') : navigate(b.dataset.tab)));
+document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => b.dataset.tab === 'library' ? openLibrary(state.owner || '') : navigate(b.dataset.tab)));
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
 
 $('camera-open').addEventListener('click', openCamera);
@@ -792,7 +807,7 @@ $('upload-photo').addEventListener('click', () => {
 
 $('photo-input').addEventListener('change', event => {
   const file = event.target.files[0];
-  if (file) setPhoto(file, event.target.dataset.view).catch(err => toast(err.message));
+  if (file) setPhoto(file, event.target.dataset.view || state.view).catch(err => toast(err.message));
 });
 
 $('queue-book').addEventListener('click', async () => {
@@ -806,6 +821,8 @@ $('queue-book').addEventListener('click', async () => {
     for (const view of Object.keys(views)) {
       if (state.photos[view]) form.append(view, state.photos[view].blob, view + '.jpg');
     }
+    form.append('scan_mode',$('scan-mode-kind').value);
+    form.append('book_count',$('scan-mode-kind').value==='shelf'?$('shelf-book-count').value:'1');
     form.append('shelf', $('scan-shelf').value.trim());
     form.append('enrichment', state.me.secondary_review ? state.me.review_mode : 'off');
     if ($('scan-library').value) form.append('library_id', $('scan-library').value);
@@ -828,6 +845,8 @@ $('review-form').addEventListener('submit', event => {
   event.preventDefault();
   formAction(event.currentTarget, async () => {
     await api('/scans/' + state.review.id + '/save', { method: 'POST', body: reviewedBody('review-book') });
+    state.scans=state.scans.filter(scan=>scan.id!==state.review.id);
+    renderQueue();updateQueueBadge();
     $('review-dialog').close();
     await refreshAll();
     toast('Book added to your library.');
@@ -870,7 +889,7 @@ $('swap-form').addEventListener('submit', event => {
   }, 'swap-error');
 });
 
-$('library-owner').addEventListener('change', () => openLibrary($('library-owner').value));
+$('library-owner').addEventListener('change', () => $('library-owner').value==='__public__'?navigate('public'):openLibrary($('library-owner').value));
 $('my-library').addEventListener('click', () => openLibrary(''));
 
 $('library-search').addEventListener('input', renderLibrary);
