@@ -256,12 +256,18 @@ class Scanner:
                 return False
             row, images = claimed
             try:
-                raw = await self.identify(images)
+                if row['scan_mode']=='shelf':
+                    from core.batch import detect,expand
+                    books=await detect(self,images,row['book_count'])
+                    await asyncio.to_thread(expand,self,row,images[0],books)
+                    return True
+                raw = Metadata.model_validate_json(row['original_metadata']) if row['scan_mode']=='spine' else await self.identify(images)
                 if not await asyncio.to_thread(self.active,row['id']):
                     return True
                 with self.db() as c:
                     c.execute("UPDATE scans SET status='enriching',original_metadata=? WHERE id=? AND status='identifying'",(raw.model_dump_json(),row['id']))
                 metadata,notes,changes,sources,suggestion = await self.enrich(raw,row['enrichment_mode'])
+                notes=json.loads(row['warnings'])+notes if row['scan_mode']=='spine' else notes
                 with self.db() as c:
                     c.execute("UPDATE scans SET status='ready',metadata=?,warnings=?,corrections=?,sources=?,lookup_suggestion=?,expires=? WHERE id=? AND status='enriching'",
                               (metadata.model_dump_json(),json.dumps(notes),json.dumps(changes),json.dumps(sources),json.dumps(suggestion),int(time.time())+86400,row['id']))
@@ -289,18 +295,24 @@ class Scanner:
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(self.wake.wait(),timeout=1)
 
-    def enqueue(self, owner, photos, mode, library_id=None, shelf=""):
+    def enqueue(self, owner, photos, mode, library_id=None, shelf="", scan_mode="single", book_count=1):
+        from core.shelves import allocate
+        if scan_mode not in ('single','shelf') or not 1<=book_count<=5:raise ScanError('Choose one book, or 1–5 shelf spines.')
+        if scan_mode=='single':book_count=1
+        if scan_mode=='shelf' and (len(photos)!=1 or photos[0][0]!='front'):raise ScanError('Shelf mode uses one photo of up to five spines.')
         with self.db() as c:
             pending = "status IN ('queued','identifying','enriching')"
-            if c.execute('SELECT COUNT(*) FROM scans WHERE '+pending).fetchone()[0]>=self.settings.max_pending:
+            if c.execute('SELECT COALESCE(SUM(book_count),0) FROM scans WHERE '+pending).fetchone()[0]+book_count>self.settings.max_pending:
                 raise ScanError('Scan queue full. Try again after some books finish.')
-            if c.execute('SELECT COUNT(*) FROM scans WHERE owner=? AND '+pending,(owner,)).fetchone()[0]>=self.settings.max_user_pending:
+            if c.execute('SELECT COALESCE(SUM(book_count),0) FROM scans WHERE owner=? AND '+pending,(owner,)).fetchone()[0]+book_count>self.settings.max_user_pending:
                 raise ScanError('Your scan queue is full. Wait for a book to finish.')
             identifier = secrets.token_hex(16)
             if library_id and not c.execute('SELECT 1 FROM library_members WHERE library_id=? AND user_id=?',(library_id,owner)).fetchone():
                 raise ScanError('Library access removed. Ask its manager to add you again.')
             c.execute("INSERT INTO scans(id,owner,status,enrichment_mode,created,queued_at) VALUES(?,?,'queued',?,?,?)",(identifier,owner,mode,int(time.time()),time.time()))
-            c.execute('UPDATE scans SET shelf=? WHERE id=?',(shelf,identifier))
+            position=allocate(c,shelf,owner,library_id)
+            for _ in range(book_count-1):allocate(c,shelf,owner,library_id)
+            c.execute('UPDATE scans SET shelf=?,shelf_position=?,scan_mode=?,book_count=? WHERE id=?',(shelf,position,scan_mode,book_count,identifier))
             if library_id: c.execute('UPDATE scans SET library_id=? WHERE id=?',(library_id,identifier))
             for i,(view,image) in enumerate(photos):
                 c.execute('INSERT INTO scan_images VALUES(?,?,?,?)',(identifier,i,view,image))
