@@ -11,7 +11,8 @@ import secrets
 import sqlite3
 import time
 import sys
-from api import community, mobile
+from api import community, mobile, public
+from core import shelves, batch
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -48,6 +49,7 @@ async def lifespan(app):
         initialize(db)
         community.initialize(db)
         mobile.initialize(db)
+        with db() as c: shelves.initialize(c)
         cleanup_expired()
         app.state.scanner = Scanner(db)
         tasks = [asyncio.create_task(expiry_loop()), asyncio.create_task(community.email_loop(db))]
@@ -71,7 +73,7 @@ async def expiry_loop():
     while True:
         await asyncio.sleep(60)
         await asyncio.to_thread(cleanup_expired)
-app = FastAPI(title='BookBridge', version='0.5.1', lifespan=lifespan,
+app = FastAPI(title='BookBridge', version='0.7.0', lifespan=lifespan,
               description='Private books, durable scan queue, up to three photos, Gemma + text enrichment, and friend swaps. Photos require Bearer authentication.')
 STATIC = Path(__file__).parent.parent / 'static'
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
@@ -206,7 +208,10 @@ def public_scan(c, row):
     position = None
     if row['status']=='queued':
         position = c.execute("SELECT COUNT(*) FROM scans WHERE status='queued' AND (queued_at<? OR (queued_at=? AND seq<=?))", (row['queued_at'],row['queued_at'],row['seq'])).fetchone()[0]
-    result = {k:row[k] for k in ('id','status','enrichment_mode','created','expires','error','library_id','shelf')}
+    result = {k:row[k] for k in ('id','status','enrichment_mode','created','expires','error','library_id','shelf','shelf_position','scan_mode','book_count','batch_id','batch_position')}
+    result['shelf_label'] = shelves.label(row['shelf'],row['shelf_position'])
+    if row['scan_mode']=='shelf' and row['status']=='ready':result['status']='expanded'
+    result['child_scan_ids']=json.loads(row['batch_children'])
     result['scan_id'] = identifier
     result['queue_position'] = position
     result['status_url'] = '/scans/'+identifier
@@ -217,9 +222,10 @@ def public_scan(c, row):
     return result
 @app.post('/scans', status_code=202)
 async def scan(request: Request, front: UploadFile | None = File(None), spine: UploadFile | None = File(None),
-               back: UploadFile | None = File(None), enrichment: Mode | None = Form(None), library_id: str | None = Form(None), shelf: str = Form(default="", max_length=100),
+               back: UploadFile | None = File(None), enrichment: Mode | None = Form(None), library_id: str | None = Form(None), shelf: str = Form(default="", max_length=100), scan_mode: str = Form(default="single"), book_count: int = Form(default=1,ge=1,le=5),
                cover: UploadFile | None = File(None, description='Legacy name for front. Do not combine with front.'),
                details: UploadFile | None = File(None, description='Legacy name for back. Do not combine with back.'), me=Depends(user)):
+    if scan_mode not in ('single','shelf'):fail(422,'Choose single-book or shelf mode.')
     library_id = library_id or None
     with db() as c:
         if library_id: community.library_access(c,library_id,me['id'])
@@ -237,6 +243,7 @@ async def scan(request: Request, front: UploadFile | None = File(None), spine: U
     back = back or details
     if not front:
         fail(422, 'A front cover photo is required.')
+    if scan_mode=='shelf' and (spine or back):fail(422,'Use one shelf photo with no more than 5 spines.')
     photos = []
     for view,upload in (('front',front),('spine',spine),('back',back)):
         if upload:
@@ -251,7 +258,7 @@ async def scan(request: Request, front: UploadFile | None = File(None), spine: U
     scanner = app.state.scanner
     try:
         mode = enrichment or (preferences['review_mode'] if preferences['secondary_review'] else 'off')
-        identifier = scanner.enqueue(me['id'],photos,mode,library_id=library_id,shelf=shelf.strip())
+        identifier = scanner.enqueue(me['id'],photos,mode,library_id=library_id,shelf=shelf.strip(),scan_mode=scan_mode,book_count=book_count)
     except ScanError as e:
         fail(429,str(e))
     with db() as c:
@@ -261,7 +268,7 @@ def list_scans(limit: int = 100, me=Depends(user)):
     if not 1 <= limit <= 500:
         fail(422,'limit must be between 1 and 500.')
     with db() as c:
-        rows = c.execute('SELECT * FROM scans WHERE ((library_id IS NULL AND owner=?) OR library_id IN (SELECT library_id FROM library_members WHERE user_id=?)) AND (expires IS NULL OR expires>?) ORDER BY seq DESC LIMIT ?', (me['id'],me['id'],now(),limit)).fetchall()
+        rows = c.execute("SELECT * FROM scans WHERE ((library_id IS NULL AND owner=?) OR library_id IN (SELECT library_id FROM library_members WHERE user_id=?)) AND (expires IS NULL OR expires>?) AND NOT (scan_mode='shelf' AND status='ready') ORDER BY seq DESC LIMIT ?", (me['id'],me['id'],now(),limit)).fetchall()
         return [public_scan(c,r) for r in rows]
 @app.get('/scans/{scan_id}')
 def scan_status(scan_id: str, me=Depends(user)):
@@ -283,7 +290,7 @@ def retry_scan(scan_id: str, me=Depends(user)):
         if row['status'] != 'failed':
             fail(409,'Only failed scans can be retried.')
         pending = "status IN ('queued','identifying','enriching')"
-        if c.execute('SELECT COUNT(*) FROM scans WHERE '+pending).fetchone()[0]>=scanner.settings.max_pending or c.execute('SELECT COUNT(*) FROM scans WHERE owner=? AND '+pending,(me['id'],)).fetchone()[0]>=scanner.settings.max_user_pending:
+        if c.execute('SELECT COALESCE(SUM(book_count),0) FROM scans WHERE '+pending).fetchone()[0]+row['book_count']>scanner.settings.max_pending or c.execute('SELECT COALESCE(SUM(book_count),0) FROM scans WHERE owner=? AND '+pending,(me['id'],)).fetchone()[0]+row['book_count']>scanner.settings.max_user_pending:
             fail(429,'Scan queue is full. Try again later.')
         c.execute("UPDATE scans SET status='queued',error=NULL,expires=NULL,queued_at=? WHERE id=?", (time.time(),scan_id))
         result = public_scan(c,scan_row(c,scan_id,me['id']))
@@ -297,12 +304,15 @@ def save(scan_id: str, body: BookInput, me=Depends(user)):
         fail(422, str(e))
     with db() as c:
         row = scan_row(c,scan_id,me['id'])
+        if row['scan_mode']=='shelf':fail(409,'Review and save the individual books from this shelf photo.')
         if row['status'] != 'ready':
             fail(409,'Wait until the scan is ready, then review before saving.')
         identifier = uid()
         audit = {k:json.loads(row[k]) for k in ('metadata','original_metadata','corrections','sources','lookup_suggestion')}
-        c.execute('INSERT INTO books(id,owner,title,author,isbn,available,created,scan_audit,library_id,shelf) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                  (identifier,row['owner'],body.title,body.author,isbn,int(body.available and not row['library_id']),now(),json.dumps(audit),row['library_id'],row['shelf'] if body.shelf is None else body.shelf))
+        shelf = row['shelf'] if body.shelf is None else body.shelf
+        position = shelves.location(c,row,shelf)
+        c.execute('INSERT INTO books(id,owner,title,author,isbn,available,created,scan_audit,library_id,shelf,shelf_position,added_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                  (identifier,row['owner'],body.title,body.author,isbn,int(body.available and not row['library_id']),now(),json.dumps(audit),row['library_id'],shelf,position,batch.next_order(c)))
         c.execute('INSERT INTO book_images SELECT ?,position,view,image FROM scan_images WHERE scan_id=?', (identifier,scan_id))
         c.execute('DELETE FROM scans WHERE id=?', (scan_id,))
     return {'book_id': identifier}
@@ -321,6 +331,7 @@ def locked(c, identifier):
 def public_book(c, row):
     result = {k:row[k] for k in row.keys() if k != 'scan_audit'}
     result['edition_key'] = mobile.edition_key(row)
+    result['shelf_label'] = shelves.label(row['shelf'],row['shelf_position'])
     result['scan_audit'] = json.loads(row['scan_audit'])
     result['images'] = [{'position':r['position'],'view':r['view'],'url':f'/books/{row["id"]}/images/{r["position"]}'} for r in c.execute('SELECT position,view FROM book_images WHERE book_id=? ORDER BY position',(row['id'],))]
     result['image_url'] = '/books/'+row['id']+'/image'
@@ -357,7 +368,9 @@ def edit(book_id: str, body: BookInput, me=Depends(user)):
         community.book_edit(c,row,me)
         if locked(c,book_id):
             fail(409,'Cancel the accepted trade before editing.')
-        c.execute('UPDATE books SET title=?,author=?,isbn=?,available=?,shelf=? WHERE id=?', (body.title,body.author,isbn,int(body.available and not row['library_id']),row['shelf'] if body.shelf is None else body.shelf,book_id))
+        shelf = row['shelf'] if body.shelf is None else body.shelf
+        position = shelves.location(c,row,shelf)
+        c.execute('UPDATE books SET title=?,author=?,isbn=?,available=?,shelf=?,shelf_position=? WHERE id=?', (body.title,body.author,isbn,int(body.available and not row['library_id']),shelf,position,book_id))
         c.execute("UPDATE trades SET status='cancelled' WHERE status='pending' AND (wanted=? OR offered=?)", (book_id,book_id))
         return public_book(c,book(c,book_id))
 @app.delete('/books/{book_id}', status_code=204)
@@ -432,8 +445,8 @@ def handoff(trade_id: str, me=Depends(user)):
         if t['sender_confirm'] and t['recipient_confirm']:
             if book(c,t['wanted'])['owner'] != t['recipient'] or book(c,t['offered'])['owner'] != t['sender']:
                 fail(409,'Ownership changed.')
-            c.execute("UPDATE books SET owner=?,available=0,shelf='' WHERE id=?", (t['sender'],t['wanted']))
-            c.execute("UPDATE books SET owner=?,available=0,shelf='' WHERE id=?", (t['recipient'],t['offered']))
+            c.execute("UPDATE books SET owner=?,available=0,shelf='',shelf_position=NULL,added_order=? WHERE id=?", (t['sender'],batch.next_order(c),t['wanted']))
+            c.execute("UPDATE books SET owner=?,available=0,shelf='',shelf_position=NULL,added_order=? WHERE id=?", (t['recipient'],batch.next_order(c),t['offered']))
             c.execute("UPDATE trades SET status='completed' WHERE id=?", (trade_id,))
         return dict(trade(c,trade_id,me))
 @app.get('/health')
@@ -443,3 +456,5 @@ def health():
 community.install(app, sys.modules[__name__])
 
 mobile.install(app, sys.modules[__name__])
+
+public.install(app, sys.modules[__name__])

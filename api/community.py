@@ -1,5 +1,7 @@
 """Profiles, consent-based discovery, reading journals, and moderation."""
 import asyncio
+import csv
+import io
 import hashlib
 import json
 import os
@@ -11,6 +13,7 @@ import time
 from email.message import EmailMessage
 from typing import Literal
 from fastapi import Depends, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -36,6 +39,8 @@ def initialize(db):
         '''.split(';'):
             if sql.strip(): c.execute(sql)
         c.execute('CREATE TABLE IF NOT EXISTS libraries(id TEXT PRIMARY KEY,name TEXT NOT NULL,owner TEXT REFERENCES users(id),created INTEGER)')
+        if 'is_public' not in {r['name'] for r in c.execute('PRAGMA table_info(libraries)')}:
+            c.execute('ALTER TABLE libraries ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0')
         c.execute('CREATE TABLE IF NOT EXISTS library_members(library_id TEXT REFERENCES libraries(id),user_id TEXT REFERENCES users(id),PRIMARY KEY(library_id,user_id))')
         for table in ('books','scans'):
             if 'library_id' not in {r['name'] for r in c.execute('PRAGMA table_info('+table+')')}:
@@ -187,6 +192,7 @@ class BulkSave(BaseModel):
 
 
 class LibraryInput(BaseModel):
+    is_public: bool = False
     name: str = Field(min_length=1,max_length=100)
     @field_validator('name')
     @classmethod
@@ -345,7 +351,7 @@ def install(app, m):
     def accept_ready(body: BulkSave, me=Depends(user)):
         if not body.acknowledge: fail(422,'Acknowledge that AI results may be wrong before saving without review.')
         with db() as c:
-            rows = [dict(r) for r in c.execute("SELECT * FROM scans WHERE library_id IS NULL AND owner=? AND status='ready' AND expires>? ORDER BY seq LIMIT 500",(me['id'],m.now()))]
+            rows = [dict(r) for r in c.execute("SELECT * FROM scans WHERE library_id IS NULL AND owner=? AND status='ready' AND scan_mode<>'shelf' AND expires>? ORDER BY seq LIMIT 500",(me['id'],m.now()))]
         saved, skipped = [], []
         for row in rows:
             try:
@@ -441,11 +447,27 @@ def install(app, m):
         with db() as c:
             return [dict(r) for r in c.execute('SELECT l.*,COUNT(DISTINCT b.id) AS books FROM libraries l JOIN library_members lm ON lm.library_id=l.id AND lm.user_id=? LEFT JOIN books b ON b.library_id=l.id AND b.removed=0 GROUP BY l.id ORDER BY l.name',(me['id'],))]
 
+    @app.get('/libraries/{library_id}/export.csv')
+    def export_library(library_id: str, me=Depends(user)):
+        with db() as c:
+            library_access(c,library_id,me['id'])
+            rows=c.execute('SELECT title,author,isbn,shelf,shelf_position FROM books WHERE library_id=? AND removed=0 ORDER BY title COLLATE NOCASE,author COLLATE NOCASE,isbn,shelf,id',(library_id,)).fetchall()
+        output=io.StringIO(newline='')
+        writer=csv.writer(output)
+        writer.writerow(['Title','Author','ISBN','Shelf'])
+        def cell(value):
+            text=str(value or '')
+            # Prevent user-entered labels from becoming spreadsheet formulas.
+            return "'"+text if text.lstrip().startswith(('=','+','-','@')) or text.startswith(('\t','\r','\n')) else text
+        from core.shelves import label
+        for row in rows: writer.writerow([cell(row['title']),cell(row['author']),cell(row['isbn']),cell(label(row['shelf'],row['shelf_position']))])
+        return Response(('\ufeff'+output.getvalue()).encode('utf-8'),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="library-'+library_id+'.csv"','Cache-Control':'no-store'})
+
     @app.post('/libraries',status_code=201)
     def create_library(body: LibraryInput, me=Depends(admin)):
         with db() as c:
             identifier = m.uid()
-            c.execute('INSERT INTO libraries VALUES(?,?,?,?)',(identifier,body.name,me['id'],m.now()))
+            c.execute('INSERT INTO libraries(id,name,owner,created,is_public) VALUES(?,?,?,?,?)',(identifier,body.name,me['id'],m.now(),int(body.is_public)))
             c.execute('INSERT INTO library_members VALUES(?,?)',(identifier,me['id']))
         return {'id':identifier,'name':body.name}
 
@@ -476,7 +498,7 @@ def install(app, m):
         if not body.acknowledge: fail(422,'Acknowledge that AI results may be wrong.')
         with db() as c:
             library_access(c,library_id,me['id'])
-            rows = [dict(r) for r in c.execute("SELECT * FROM scans WHERE library_id=? AND status='ready' AND expires>? ORDER BY seq LIMIT 500",(library_id,m.now()))]
+            rows = [dict(r) for r in c.execute("SELECT * FROM scans WHERE library_id=? AND status='ready' AND scan_mode<>'shelf' AND expires>? ORDER BY seq LIMIT 500",(library_id,m.now()))]
         saved,skipped = [],[]
         for row in rows:
             try:
