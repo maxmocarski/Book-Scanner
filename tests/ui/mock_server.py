@@ -1,15 +1,20 @@
 """Disposable test server: real API/database, fake model/search responses."""
 import asyncio
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import api.main as main
 from core.scanning import Metadata, Scanner, SecondPass
+from core.batch import ShelfPhoto,Spine
 import uvicorn
 async def generate(self, model, prompt, schema, images=None):
     await asyncio.sleep(.15)
+    if schema is ShelfPhoto:
+        count=int(re.search(r'user counted (\d+)',prompt).group(1))
+        return ShelfPhoto(books=[Spine(metadata=Metadata(title='Shelf Book '+str(i+1),author='Shelf Author'),left=i/count,right=(i+1)/count) for i in range(count)])
     if schema is Metadata:
         return Metadata(title='The Great Gatsbv', author='F. Sc0tt Fitzgerald', isbn='978O743273565')
     return SecondPass(metadata=Metadata(title='The Great Gatsby', author='F. Scott Fitzgerald', isbn='9780743273565'),
