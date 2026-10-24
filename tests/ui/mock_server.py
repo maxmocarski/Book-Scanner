@@ -9,9 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import api.main as main
 from core.scanning import Metadata, Scanner, SecondPass
 from core.batch import ShelfPhoto,Spine
+from core.genres import Classification
 import uvicorn
 async def generate(self, model, prompt, schema, images=None):
     await asyncio.sleep(.15)
+    if schema is Classification:
+        return Classification(genre='Fantasy' if 'Shelf Book' in prompt else 'Fiction')
     if schema is ShelfPhoto:
         count=int(re.search(r'user counted (\d+)',prompt).group(1))
         return ShelfPhoto(books=[Spine(metadata=Metadata(title='Shelf Book '+str(i+1),author='Shelf Author'),left=i/count,right=(i+1)/count) for i in range(count)])
@@ -30,3 +33,4 @@ if __name__ == '__main__':
     with tempfile.TemporaryDirectory(prefix='bookbridge-ui-') as directory:
         main.DATA = Path(directory)
         uvicorn.run(main.app, host='127.0.0.1', port=8765, log_level='warning')
+

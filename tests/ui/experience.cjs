@@ -16,6 +16,12 @@ const base=process.argv[2] || 'http://127.0.0.1:8765';
   await page.locator('#walkthrough-dialog').waitFor({state:'visible'});
   for(let i=0;i<3;i++)await page.locator('#walkthrough-next').click();
   assert.equal(await page.locator('#walkthrough-next').textContent(),'Scan your library');await page.locator('#walkthrough-next').click();await page.locator('#page-scan').waitFor({state:'visible'});
+  for(const width of [390,1280]) {
+    await page.setViewportSize({width,height:844});
+    const order=await page.evaluate(()=>['camera-video','queue-book','scan-mode-kind','photo-slots','scan-shelf'].map(id=>document.getElementById(id).getBoundingClientRect().top));
+    assert(order.every((y,i)=>i===0 || y>order[i-1]),'Camera, queue, mode, photos, shelf order');
+  }
+  await page.setViewportSize({width:390,height:844});
   const png=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=300;c.height=420;const x=c.getContext('2d');x.fillStyle='#314d3c';x.fillRect(0,0,300,420);x.fillStyle='#fffae9';x.font='28px serif';x.fillText('A GOOD STORY',30,180);return c.toDataURL().split(',')[1];}),'base64');
   await page.locator('#photo-input').setInputFiles({name:'cover.png',mimeType:'image/png',buffer:png});await page.locator('#queue-book').click();await text('scan-feedback','queued');
   await page.waitForFunction(()=>document.getElementById('scan-progress').textContent.includes('ready to review'));
@@ -48,6 +54,65 @@ const base=process.argv[2] || 'http://127.0.0.1:8765';
    for(const tab of ['library','scan','settings']){await nav(tab);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Overflow '+width+' '+tab);}
   }
   await page.setViewportSize({width:390,height:844});await nav('library');await page.locator('#book-grid .book-card').scrollIntoViewIfNeeded();await page.waitForTimeout(250);assert(await page.locator('#book-grid .book-card h3').isVisible());await page.screenshot({path:'/tmp/bookbridge-library.png',fullPage:true});await nav('scan');await page.screenshot({path:'/tmp/bookbridge-scan.png',fullPage:true});
-  assert.deepEqual(errors,[]);console.log('PASS: onboarding, library landing, uploads, shelf review, locked details, cover zoom, autosave, close flush, failure/retry, validation, serialized writes, help and five viewport sizes.');
+  // Optional shelves use text spines and zoom without changing book data.
+  for(const scan of await json('/scans?limit=500')) {
+    if(scan.status==='ready')await json('/scans/'+scan.id+'/save',{title:scan.metadata.title,author:scan.metadata.author});
+  }
+  await nav('library');await page.waitForFunction(()=>document.querySelectorAll('#book-grid .book-card').length===4);
+  assert.equal(await page.locator('#page-library [data-catalog-view=cards]').getAttribute('aria-pressed'),'true');
+  await page.locator('#page-library [data-catalog-view=shelves]').click();
+  assert.equal(await page.locator('#book-grid img').count(),0);
+  assert.equal(await page.locator('#book-grid .book-spine').count(),4);
+  assert(!await page.locator('#page-library [data-shelf-zoom=in]').isVisible());
+  await page.locator('#page-library .trade-filter summary').click();
+  await page.locator('#page-library [data-shelf-zoom=reset]').click();
+  const spineHeight=await page.locator('#book-grid .book-spine').first().evaluate(el=>el.offsetHeight);
+  await page.locator('#page-library [data-shelf-zoom=in]').click();
+  assert(await page.locator('#book-grid .book-spine').first().evaluate(el=>el.offsetHeight)>spineHeight);
+  await page.locator('#page-library [data-shelf-zoom=reset]').click();
+  await page.locator('#book-grid').evaluate(el=>el.scrollIntoView({block:'start'}));
+  const rect=await page.locator('#book-grid').boundingBox();
+  const y=Math.max(20,rect.y+70),x=rect.x+120;
+  const cdp=await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:x-35,y},{x:x+35,y}]});
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x-55,y},{x:x+55,y}]});
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  assert(await page.locator('#book-grid .book-spine').first().evaluate(el=>el.offsetHeight)>spineHeight,'Pinch grows spines');
+  assert(!await page.locator('#book-dialog').isVisible(),'Pinch must not open a book');
+  await page.waitForTimeout(550);
+  await page.locator('#book-grid .book-spine').first().click();
+  await page.locator('#book-dialog').waitFor({state:'visible'});await page.locator('[data-close=book-dialog]').click();
+  for(const width of [320,390,1280]) {
+    await page.setViewportSize({width,height:844});
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Shelf overflow '+width);
+  }
+  await page.setViewportSize({width:390,height:844});
+  await page.locator('#page-library [data-shelf-zoom=reset]').click();
+  await page.locator('#page-library .trade-filter summary').click();
+  await page.locator('#book-grid').evaluate(el=>el.scrollIntoView({block:'start'}));
+  await page.screenshot({path:'/tmp/bookbridge-shelves.png'});
+  await page.locator('#page-library [data-catalog-view=list]').click();assert.equal(await page.locator('#book-grid img').count(),0);
+  await page.locator('#page-library [data-catalog-view=cards]').click();assert.equal(await page.locator('#book-grid .book-card').count(),4);
+  await page.locator('#page-library [data-catalog-view=shelves]').click();await page.reload();
+  await page.locator('#book-grid .book-card').first().waitFor();assert.equal(await page.locator('#book-grid .book-spine').count(),0,'Reload defaults to Covers');
+  // Genre checks persist and the filter applies to each display mode.
+  await page.locator('#page-library .trade-filter summary').click();
+  await page.locator('#genre-check').click();
+  await page.waitForFunction(()=>[...document.querySelectorAll('#genre-filter option')].some(o=>o.value==='Fantasy'));
+  await page.waitForFunction(()=>document.querySelector('#genre-status').textContent.includes('All books have a genre'));
+  assert((await json('/books')).every(b=>b.genre));
+  await page.locator('#genre-filter').selectOption('Fantasy');
+  assert.equal(await page.locator('#book-grid .book-card').count(),3);
+  await page.locator('#page-library [data-catalog-view=shelves]').click();assert.equal(await page.locator('#book-grid .book-spine').count(),3);
+  await page.locator('#page-library [data-catalog-view=list]').click();assert.equal(await page.locator('#book-grid .book-card').count(),3);
+  await page.locator('#genre-filter').selectOption('Fiction');await page.locator('#book-grid .book-card').click();
+  assert(await page.locator('#book-genre').isDisabled());assert.equal(await page.locator('#book-genre').inputValue(),'Fiction');
+  await page.locator('#edit-book').click();await page.locator('#book-genre').selectOption('History');await text('book-save-status','All changes saved');
+  await page.locator('[data-close=book-dialog]').click();
+  await page.locator('#genre-filter').selectOption('History');assert.equal(await page.locator('#book-grid .book-card').count(),1);
+  await page.reload();await page.locator('#book-grid .book-card').first().waitFor();
+  await page.locator('#page-library .trade-filter summary').click();await page.locator('#genre-filter').selectOption('History');assert.equal(await page.locator('#book-grid .book-card').count(),1);
+  await page.screenshot({path:'/tmp/bookbridge-genres.png',fullPage:true});
+  assert.deepEqual(errors,[]);console.log('PASS: onboarding, library landing, uploads, shelf review, locked details, cover zoom, autosave, close flush, failure/retry, validation, serialized writes, help five viewport sizes, camera-first order, shelf spines, pinch/button zoom, Covers default, AI genres, genre filters and manual genre autosave.');
  } finally {await browser.close();}
 })().catch(err=>{console.error(err);process.exit(1);});
