@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#283d32">
   <title>BookBridge — your books, connected</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.8.0">
-  <script src="/static/app.js?v=0.8.0" defer></script>
-  <script src="/static/catalog.js?v=0.8.0" defer></script>
-  <script src="/static/community.js?v=0.8.0" defer></script>
-  <script src="/static/public.js?v=0.8.0" defer></script>
-  <script src="/static/bookshelf.js?v=0.8.0" defer></script>
-  <script src="/static/mobile.js?v=0.8.0" defer></script>
-  <script src="/static/experience.js?v=0.8.0" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.8.1">
+  <script src="/static/app.js?v=0.8.1" defer></script>
+  <script src="/static/catalog.js?v=0.8.1" defer></script>
+  <script src="/static/community.js?v=0.8.1" defer></script>
+  <script src="/static/public.js?v=0.8.1" defer></script>
+  <script src="/static/bookshelf.js?v=0.8.1" defer></script>
+  <script src="/static/mobile.js?v=0.8.1" defer></script>
+  <script src="/static/experience.js?v=0.8.1" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -81,9 +81,7 @@
             <span class="eyebrow">ADD TO YOUR LIBRARY</span>
             <h1>Scan your books</h1>
             <p id="scan-help" class="muted">Photograph the cover. The spine and back are optional.</p>
-            <label>Scan mode<select id="scan-mode-kind"><option value="single">One book</option><option value="shelf">Shelf spines · up to 5</option></select></label>
-            <div id="shelf-photo-options" hidden><label>Books in photo<select id="shelf-book-count"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label></div>
-            <p id="scan-limit" class="scan-warning" hidden>No more than 5 books per photo. Spine reading can miss text or mix books. Count the visible books and review each result. Photograph unclear books individually.</p>
+
           </div>
         </div>
 
@@ -112,6 +110,10 @@
           </div>
 
           <div class="panel scan-panel">
+            <button id="queue-book" class="primary full" disabled>Add book to queue <span aria-hidden="true">→</span></button>
+            <label>Scan mode<select id="scan-mode-kind"><option value="single">One book</option><option value="shelf">Shelf spines · up to 5</option></select></label>
+            <div id="shelf-photo-options" hidden><label>Books in photo<select id="shelf-book-count"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label></div>
+            <p id="scan-limit" class="scan-warning" hidden>No more than 5 books per photo. Spine reading can miss text or mix books. Count the visible books and review each result. Photograph unclear books individually.</p>
             <h2>Your photos</h2>
             <p class="muted">A shelf name is optional. Books without one go into Miscellaneous.</p>
             <div id="photo-slots" class="photo-slots"></div>
@@ -119,7 +121,7 @@
             <button id="upload-photo" class="secondary full">Upload front photo</button>
             <label hidden>Scan into<select id="scan-library"><option value="">My library</option></select></label>
             <label>Shelf <span class="small muted">optional</span><input id="scan-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
-            <button id="queue-book" class="primary full" disabled>Add book to queue <span aria-hidden="true">→</span></button>
+
             <p class="small muted">You can photograph the next book while this one scans.</p>
             <p id="scan-feedback" class="feedback" role="status"></p>
 
@@ -160,7 +162,13 @@
 
           <details class="trade-filter"><summary>Filter</summary><label class="check"><input id="available-only" type="checkbox"> Available to trade</label></details>
         </div>
-        <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Covers</button><button type="button" data-catalog-view="list" aria-pressed="false">List</button></div>
+        <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Shelves</button><button type="button" data-catalog-view="list" aria-pressed="false">List</button></div>
+        </div>
+        <div class="shelf-controls">
+          <label>Arrange books<select id="shelf-sort"><option value="custom">Custom shelf numbers</option><option value="title">Title · A–Z</option><option value="genre">Genre</option><option value="date">Date added · newest first</option></select></label>
+          <label>Zoom <input id="shelf-zoom" type="range" min="65" max="150" step="5" value="100"><output id="shelf-zoom-value">100%</output></label>
+          <button id="lookup-genres" class="secondary">Find missing genres with AI</button>
+          <p id="genre-status" class="small muted" role="status">Sorting works without AI. Genre lookup is optional.</p>
         </div>
         <p id="library-count" class="muted small"></p>
         <div id="library-progress" class="progress-card" hidden></div>
@@ -274,7 +282,7 @@
       <div class="page-heading"><div><h1 id="public-heading">Public libraries</h1><p id="public-description" class="muted">Browse shared collections. No account needed.</p></div><button id="public-back" class="secondary" hidden>← All public libraries</button></div>
       <details class="panel filters" id="public-filters"><summary>Search and filter libraries</summary>
       <form id="public-search-form" class="button-row"><label class="sr-only" for="public-search">Search libraries or books</label><input id="public-search" type="search" maxlength="100" placeholder="Search public libraries"><button class="secondary">Search</button></form>
-      <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Covers</button><button type="button" data-catalog-view="list" aria-pressed="false">List</button></div>
+      <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Shelves</button><button type="button" data-catalog-view="list" aria-pressed="false">List</button></div>
       </details>
       <p id="public-status" class="muted" role="status"></p><div id="public-results" class="book-grid"></div><button id="public-more" class="secondary" hidden>Load more</button>
     </section>
@@ -334,6 +342,8 @@
         <input id="book-isbn" maxlength="32">
       </label>
       <label>Shelf <span class="small muted">optional</span><input id="book-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
+      <label>Book number on shelf<input id="book-shelf-position" type="number" min="1" max="1000000" placeholder="Automatic"></label>
+      <label>Genre<input id="book-genre" maxlength="100" placeholder="Uncategorized"></label>
       <p id="book-shelf-location" class="small muted"></p>
       <label class="check" id="book-available-label">
         <input id="book-available" type="checkbox"> Available to trade
@@ -388,4 +398,5 @@
   <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
+
 
