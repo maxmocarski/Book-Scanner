@@ -183,6 +183,7 @@ async function startSession() {
   navigate('library');
   await refreshAll();
   if (!state.me.profile_complete) showProfileSetup();
+  else offerWalkthrough();
   clearInterval(state.poll);
   state.poll = setInterval(() => {
     if (state.me && !document.hidden) refreshScans().catch(() => {});
@@ -263,6 +264,7 @@ async function refreshScans() {
 
 function updateQueueBadge() {
   const count = state.scans.length;
+  renderScanProgress();
   $('queue-count').textContent = count;
   $('queue-count').hidden = !count;
 }
@@ -502,7 +504,10 @@ function photoStrip(root, photos) {
   root.replaceChildren();
   for (const photo of photos) {
     const figure = e('figure');
-    figure.append(image(photo.url, '', photo.view + ' of the book'), e('figcaption', '', photo.view));
+    const expand = button('', 'photo-expand', () => expandBookPhoto(photo));
+    expand.setAttribute('aria-label', 'Expand ' + photo.view + ' photo');
+    expand.append(image(photo.url, '', photo.view + ' of the book'));
+    figure.append(expand, e('figcaption', '', photo.view + ' · tap to expand'));
     root.append(figure);
   }
 }
@@ -600,7 +605,8 @@ function renderLibrary() {
   $('library-export').hidden = !state.owner.startsWith('lib:');
   const friend = state.friends.find(f => f.id === state.owner);
   const shared = (state.libraries || []).find(l => 'lib:' + l.id === state.owner);
-  $('library-title').textContent = shared ? shared.name : friend ? (friend.display_name || friend.username) + "’s library." : 'My bookshelf';
+  $('library-title').textContent = shared ? shared.name : friend ? (friend.display_name || friend.username) + "’s library." : 'Your library';
+  $('library-description').hidden = !state.owner;
   $('library-description').textContent = shared ? 'Shared bookshelf.' : friend ? 'Books shared with you.' : 'Choose a book to view its details.';
 
   const query = $('library-search').value.toLocaleLowerCase().trim();
@@ -614,7 +620,7 @@ function renderLibrary() {
 
   if (state.libraryLoading) { grid.append(e('p','muted','Loading this library…')); return; }
   if (!books.length) {
-    empty(grid, state.books.length ? 'No matches yet.' : friend ? 'An empty shelf.' : 'Make room for your first book.', state.books.length ? 'Try another title or author.' : friend ? 'Your friend hasn’t added any books yet.' : 'Scan a book and save it here.', !friend && !state.books.length ? button('Scan a book', 'primary', () => { $('scan-library').value = shared?.id || ''; navigate('scan'); }) : null);
+    empty(grid, state.books.length ? 'No matches yet.' : friend ? 'An empty shelf.' : 'Scan your library', state.books.length ? 'Try another title or author.' : friend ? 'Your friend hasn’t added any books yet.' : 'Start with one cover or a few book spines. Review the results, then find every saved book here.', !friend && !state.books.length ? button('Scan your first books', 'primary', () => { $('scan-library').value = shared?.id || ''; navigate('scan'); }) : null);
     grid.firstChild.style.gridColumn = '1 / -1';
     return;
   }
@@ -639,9 +645,8 @@ function openBook(book) {
   $('book-shelf-location').textContent = book.shelf_label ? 'Current location: '+book.shelf_label : '';
   $('book-available').checked = Boolean(book.available);
 
-  ['book-title', 'book-author', 'book-isbn', 'book-shelf', 'book-available'].forEach(id => $(id).disabled = !own || locked);
-  $('book-own-actions').hidden = !own;
-  $('book-own-actions').querySelector('.primary').disabled = locked;
+  beginBookDetails(book, own && !locked);
+  $('book-own-actions').hidden = true;
   $('delete-book').disabled = locked;
   $('book-available-label').hidden = !own || Boolean(book.library_id) || state.me.private_library;
   $('reading-open').hidden = book.owner !== state.me.id;
@@ -793,7 +798,10 @@ $('logout').addEventListener('click', async () => {
 });
 
 document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => b.dataset.tab === 'library' ? openLibrary(state.owner || '') : navigate(b.dataset.tab)));
-document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => $(b.dataset.close).close()));
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.close === 'book-dialog') closeBookDetails().catch(err => toast(err.message));
+  else $(b.dataset.close).close();
+}));
 
 $('camera-open').addEventListener('click', openCamera);
 $('camera-close').addEventListener('click', stopCamera);
@@ -855,18 +863,13 @@ $('review-form').addEventListener('submit', event => {
 
 $('book-form').addEventListener('submit', event => {
   event.preventDefault();
-  if (state.book.owner !== state.me.id && !(state.libraries || []).some(l => l.id === state.book.library_id && l.owner === state.me.id)) return;
-  formAction(event.currentTarget, async () => {
-    await api('/books/' + state.book.id, { method: 'PATCH', body: reviewedBody('book') });
-    $('book-dialog').close();
-    await refreshAll();
-    toast('Book updated.');
-  }, 'book-error');
+  finishBookEditing().catch(err => toast(err.message));
 });
 
 $('delete-book').addEventListener('click', async () => {
   if (!confirm('Remove this book and its photos from your library?')) return;
   try {
+    await finishBookEditing();
     await api('/books/' + state.book.id, { method: 'DELETE' });
     $('book-dialog').close();
     await refreshAll();
@@ -939,3 +942,4 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', stopCamera);
 
 renderPhotos();
+

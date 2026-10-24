@@ -6,13 +6,14 @@
   <meta name="theme-color" content="#283d32">
   <title>BookBridge — your books, connected</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.7.0">
-  <script src="/static/app.js?v=0.7.0" defer></script>
-  <script src="/static/catalog.js?v=0.7.0" defer></script>
-  <script src="/static/community.js?v=0.7.0" defer></script>
-  <script src="/static/public.js?v=0.7.0" defer></script>
-  <script src="/static/bookshelf.js?v=0.7.0" defer></script>
-  <script src="/static/mobile.js?v=0.7.0" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.8.0">
+  <script src="/static/app.js?v=0.8.0" defer></script>
+  <script src="/static/catalog.js?v=0.8.0" defer></script>
+  <script src="/static/community.js?v=0.8.0" defer></script>
+  <script src="/static/public.js?v=0.8.0" defer></script>
+  <script src="/static/bookshelf.js?v=0.8.0" defer></script>
+  <script src="/static/mobile.js?v=0.8.0" defer></script>
+  <script src="/static/experience.js?v=0.8.0" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -67,11 +68,12 @@
     <div id="workspace" hidden>
       <div id="library-dock" class="library-dock" hidden><label for="library-owner">Which library?</label><select id="library-owner"><option value="">My library</option></select></div>
       <nav class="navigation" aria-label="Main navigation">
-        <button data-tab="library" aria-pressed="true">My Library</button><button data-tab="scan" aria-pressed="false">Scan</button><button data-tab="friends" aria-pressed="false">Friends</button><button data-tab="settings" aria-pressed="false">Settings</button>
+        <button data-tab="library" aria-pressed="true">Library</button><button data-tab="scan" aria-pressed="false">Scan</button><button data-tab="friends" aria-pressed="false">Friends</button><button data-tab="settings" aria-pressed="false">Settings</button>
       </nav>
-      <nav id="scan-tabs" class="section-tabs" aria-label="Scan and review" hidden><button data-tab="scan">Scan</button><button data-tab="queue">Book queue <span id="queue-count" class="count" hidden>0</span></button></nav>
+      <nav id="scan-tabs" class="section-tabs" aria-label="Scan and review" hidden><button data-tab="scan">Scan</button><button data-tab="queue">Review <span id="queue-count" class="count" hidden>0</span></button></nav>
       <nav id="friends-tabs" class="section-tabs" aria-label="Friends and trades" hidden><button data-tab="friends">Friends</button><button data-tab="trades">Trades</button></nav>
 
+      <div id="scan-progress" class="progress-card" hidden></div>
       <!-- Scan Page -->
       <section id="page-scan" class="page">
         <div class="page-heading">
@@ -91,8 +93,8 @@
             <video id="camera-video" muted playsinline autoplay aria-label="Live camera preview"></video>
             <div class="camera-placeholder" id="camera-placeholder">
               <span class="camera-symbol" aria-hidden="true">▣</span>
-              <h2>A book worth keeping.</h2>
-              <p>Point your camera at the cover<br>or upload a photo below.</p>
+              <h2>Start with a photo.</h2>
+              <p>Take a clear photo of the cover<br>or choose one from your phone.</p>
               <button id="camera-open" class="camera-button">Open camera</button>
             </div>
 
@@ -106,21 +108,21 @@
             </div>
           </div>
 
-            <button id="queue-book" class="primary full" disabled>Add book to queue <span aria-hidden="true">→</span></button>
-            <p class="small muted">You can photograph the next book while this one scans.</p>
-            <p id="scan-feedback" class="feedback" role="status"></p>
+
           </div>
 
           <div class="panel scan-panel">
-            <h2>Photos and shelf</h2>
+            <h2>Your photos</h2>
             <p class="muted">A shelf name is optional. Books without one go into Miscellaneous.</p>
             <div id="photo-slots" class="photo-slots"></div>
             <input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
             <button id="upload-photo" class="secondary full">Upload front photo</button>
             <label hidden>Scan into<select id="scan-library"><option value="">My library</option></select></label>
             <label>Shelf <span class="small muted">optional</span><input id="scan-shelf" maxlength="100" placeholder="e.g. Living room, shelf 2"></label>
-            <p class="small muted">Books on each shelf are numbered automatically in scan order.</p>
-            <p class="small muted">Secondary AI review can be changed in Settings.</p>
+            <button id="queue-book" class="primary full" disabled>Add book to queue <span aria-hidden="true">→</span></button>
+            <p class="small muted">You can photograph the next book while this one scans.</p>
+            <p id="scan-feedback" class="feedback" role="status"></p>
+
           </div>
         </div>
       </section>
@@ -130,7 +132,7 @@
         <div class="page-heading">
           <div>
             <span class="eyebrow">KEEP THE BOOKS COMING</span>
-            <h1>Your book queue.</h1>
+            <h1>Review your scans</h1>
             <p class="muted">Review finished scans before adding them to your library.</p>
           </div>
           <button id="queue-refresh" class="secondary">Refresh</button>
@@ -145,24 +147,23 @@
         <div class="page-heading">
           <div>
             <span class="eyebrow">ALL IN ONE PLACE</span>
-            <h1 id="library-title">My bookshelf</h1>
+            <h1 id="library-title">Your library</h1>
             <p id="library-description" class="muted">Books you own, stories you can share.</p>
           </div>
-          <div class="button-row"><button id="my-library" class="secondary" hidden>← My library</button><button id="library-export" class="secondary" hidden>Export CSV</button><button id="library-refresh" class="secondary">Refresh</button></div>
+          <div class="button-row"><button id="my-library" class="secondary" hidden>← My library</button><button id="library-export" class="secondary" hidden>Export CSV</button><button data-tab="scan" class="primary">+ Add books</button><button id="library-refresh" class="text-button">Refresh</button></div>
         </div>
 
-        <details class="panel filters"><summary>Search and filter books</summary><div class="library-tools">
+        <div class="panel library-search-panel"><div class="library-tools">
           <label class="sr-only" for="library-search">Search books</label>
           <input id="library-search" type="search" placeholder="Search title, author, ISBN or shelf">
 
 
-          <label class="check">
-            <input id="available-only" type="checkbox"> Available to trade
-          </label>
+          <details class="trade-filter"><summary>Filter</summary><label class="check"><input id="available-only" type="checkbox"> Available to trade</label></details>
         </div>
-        <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Bookshelf</button><button type="button" data-catalog-view="list" aria-pressed="false">List · no pictures</button></div>
-        </details>
+        <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Covers</button><button type="button" data-catalog-view="list" aria-pressed="false">List</button></div>
+        </div>
         <p id="library-count" class="muted small"></p>
+        <div id="library-progress" class="progress-card" hidden></div>
         <div id="book-grid" class="book-grid"></div>
       </section>
 
@@ -214,7 +215,7 @@
       <section id="page-trades" class="page" hidden><h1>Your trades</h1><p class="muted">Requests and handoffs, in one place.</p><div id="trade-list" class="trade-list"></div></section>
       <section id="page-settings" class="page" hidden>
         <h1>Settings</h1>
-        <div class="button-row settings-actions"><button data-tab="stats" class="secondary">My reading stats</button><button id="admin-open" data-tab="admin" class="secondary" hidden>Admin panel</button><button id="logout" class="text-button danger">Sign out</button></div>
+        <div class="button-row settings-actions"><button data-tab="help" class="secondary">Help &amp; walkthrough</button><button data-tab="stats" class="secondary">My reading stats</button><button id="admin-open" data-tab="admin" class="secondary" hidden>Admin panel</button><button id="logout" class="text-button danger">Sign out</button></div>
         <form id="settings-form" class="settings-layout">
           <details class="panel"><summary>Your profile</summary>
             <label>First name<input id="setting-name" autocomplete="given-name" maxlength="40" required></label><label>Last name<input id="setting-lastname" autocomplete="family-name" maxlength="40" required></label>
@@ -245,6 +246,18 @@
 
         <details class="panel"><summary>Shared libraries</summary><p class="muted">An admin creates a library and its manager gives people permission to scan into its queue.</p><div id="shared-libraries"></div></details>
       </section>
+      <section id="page-help" class="page" hidden>
+        <button data-tab="settings" class="text-button">← Settings</button>
+        <span class="eyebrow">A QUICK GUIDE</span><h1>Make yourself at home.</h1>
+        <p class="muted">From a stack of books to a library in your pocket.</p>
+        <button id="replay-walkthrough" class="primary">Show me around</button>
+        <div class="help-steps">
+          <article class="panel"><span class="step-number">01</span><h2>Photograph. Queue. Repeat.</h2><p>In Scan, choose one book or shelf spines. For one book, add its cover and optionally its spine and back. For a shelf photo, include 1–5 upright spines and set the number of books.</p><p>Add the photo to the queue, then move straight to the next book. The AI works through the queue one at a time. Keep BookBridge open while uploading; queued scans continue on the server.</p><button data-tab="scan" class="secondary">Start scanning</button></article>
+          <article class="panel"><span class="step-number">02</span><h2>Check what the AI found.</h2><p>Open Scan → Review. Each book from a shelf photo gets its own result. Tap Review, correct the title and author if needed, then add it to your library. Unclear spines are best photographed individually.</p><p>Accept all ready skips individual review and saves the current AI results, including possible duplicates.</p><button data-tab="queue" class="secondary">Open review queue</button></article>
+          <article class="panel"><span class="step-number">03</span><h2>Everything lives in Library.</h2><p>Search by title, author, ISBN or shelf. Tap a book to read its details, or tap its cover photo to enlarge it. Multiple copies are grouped together.</p><p>Saved details stay read-only until you press Edit. Changes save automatically while editing. Wait for “All changes saved” or press Done before leaving. If a save fails, your edits remain open so you can retry.</p><button data-tab="library" class="secondary">Go to your library</button></article>
+          <article class="panel"><span class="step-number">04</span><h2>A little more connected.</h2><p>Use the library selector to switch between your own collection and shared or friends’ libraries. Friends holds connections and trades. Settings holds your profile, privacy and scan preferences.</p></article>
+        </div>
+      </section>
       <section id="page-stats" class="page" hidden><h1>Your reading life</h1><p class="muted">Pages and reviews come from your reading log. A completed swap counts as one book given and one received.</p><div id="reading-stats" class="stats-grid"></div>
         <h2>Reading journal</h2><p class="muted">Open a book in your library to record pages, a rating, or a review.</p><div id="reading-journal"></div>
         <details class="panel"><summary>Popular on BookBridge</summary><p class="muted small">Books on at least three discoverable personal shelves. These are community favorites, not a global bestseller list.</p><div id="popular-books"></div></details>
@@ -261,7 +274,7 @@
       <div class="page-heading"><div><h1 id="public-heading">Public libraries</h1><p id="public-description" class="muted">Browse shared collections. No account needed.</p></div><button id="public-back" class="secondary" hidden>← All public libraries</button></div>
       <details class="panel filters" id="public-filters"><summary>Search and filter libraries</summary>
       <form id="public-search-form" class="button-row"><label class="sr-only" for="public-search">Search libraries or books</label><input id="public-search" type="search" maxlength="100" placeholder="Search public libraries"><button class="secondary">Search</button></form>
-      <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Bookshelf</button><button type="button" data-catalog-view="list" aria-pressed="false">List · no pictures</button></div>
+      <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Covers</button><button type="button" data-catalog-view="list" aria-pressed="false">List</button></div>
       </details>
       <p id="public-status" class="muted" role="status"></p><div id="public-results" class="book-grid"></div><button id="public-more" class="secondary" hidden>Load more</button>
     </section>
@@ -308,6 +321,7 @@
     </div>
 
     <div id="book-photos" class="photo-strip"></div>
+    <div class="book-edit-toolbar"><button id="edit-book" type="button" class="secondary">Edit</button><p id="book-save-status" role="status" aria-live="polite">Read-only</p><button id="retry-book-save" type="button" class="text-button" hidden>Retry save</button></div>
 
     <form id="book-form">
       <label>Title
@@ -328,7 +342,7 @@
       <p id="book-error" class="inline-error" role="alert"></p>
 
       <div id="book-own-actions" class="button-row">
-        <button class="primary">Save changes</button>
+        <button class="primary">Done</button>
         <button type="button" id="delete-book" class="text-button danger">Remove book</button>
       </div>
       <button type="button" id="reading-open" class="secondary">Reading log</button>
@@ -336,6 +350,8 @@
     </form>
   </dialog>
 
+  <dialog id="photo-dialog" aria-labelledby="photo-title"><div class="dialog-heading"><h2 id="photo-title">Book photo</h2><button class="icon-button" data-close="photo-dialog" aria-label="Close expanded photo">×</button></div><div class="photo-viewer"><img id="expanded-photo" alt="Expanded book photo"></div><button id="photo-zoom" class="secondary" type="button">Zoom in</button></dialog>
+  <dialog id="walkthrough-dialog" aria-labelledby="walkthrough-title"><div class="dialog-heading"><span id="walkthrough-count" class="eyebrow"></span><button id="walkthrough-skip" class="text-button">Skip for now</button></div><div id="walkthrough-art" aria-hidden="true"></div><h2 id="walkthrough-title"></h2><p id="walkthrough-copy"></p><div class="walkthrough-actions"><button id="walkthrough-back" class="secondary">Back</button><button id="walkthrough-next" class="primary">Next</button></div></dialog>
   <dialog id="swap-dialog" aria-labelledby="swap-title">
     <div class="dialog-heading">
       <h2 id="swap-title">Offer a book in return</h2>
@@ -372,3 +388,4 @@
   <div id="toast" role="status" aria-live="polite" hidden></div>
 </body>
 </html>
+

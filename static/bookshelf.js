@@ -19,16 +19,10 @@ function renderBookshelf(root,groups,onOpen){
     if(!section.name)shelf.append(e('p','small muted','No shelf assigned · added in library order'));
     const row=e('div',catalogView==='cards'?'digital-shelf':'shelf-list');
     for(const {book,copies} of section.entries){
-      if(catalogView==='list'){row.append(makeBookCard([book,...copies.filter(b=>b.id!==book.id)],()=>onOpen(copies),()=>null));continue;}
-      const spine=button('','book-spine',()=>onOpen(copies));
-      const colors=['#2f4b3a','#6c4939','#4d5d54','#6b6040','#3d5660','#625063'];
-      let hash=0;for(const char of book.title)hash=(Math.imul(hash,31)+char.charCodeAt(0))|0;
-      spine.style.setProperty('--spine-color',colors[(hash>>>0)%colors.length]);
-      spine.style.setProperty('--spine-height',(190+((hash>>>0)%4)*7)+'px');
-      spine.append(e('span','spine-title',book.title));
-      if(book.shelf_position)spine.append(e('span','spine-number',String(book.shelf_position)));
-      spine.title=book.title+' — '+book.author+(book.shelf_label?' · '+book.shelf_label:'');
-      spine.setAttribute('aria-label',book.title+' by '+book.author);row.append(spine);
+      row.append(makeBookCard([book,...copies.filter(b=>b.id!==book.id)],()=>onOpen(copies), item => {
+        const photo = item.images.find(p=>p.view==='front') || item.images[0];
+        return photo ? (root.id==='public-results' ? publicPhoto(photo,'') : image(photo.url,'',item.title+' cover')) : null;
+      }));
     }
     shelf.append(row);root.append(shelf);
   }
@@ -50,3 +44,4 @@ function updateScanMode(){
   renderPhotos();
 }
 $('scan-mode-kind').addEventListener('change',updateScanMode);
+
