@@ -1629,3 +1629,8 @@ dialog::backdrop { background:#152e2abb; }
 :is(#book-grid,#public-results) .spine-shelf .book-spine { width:100%; max-width:calc(65px * var(--shelf-zoom,1)); min-height:0; height:calc(var(--book-height,200) * 1px * var(--shelf-zoom,1)); padding:calc(14px * var(--shelf-zoom,1)) 5px; align-self:end; justify-content:center; }
 :is(#book-grid,#public-results) .spine-shelf .spine-title { font-size:calc(16px * var(--shelf-zoom,1)); max-width:100%; height:100%; max-height:100%; text-align:center; line-height:1.18; }
 @media(min-width:651px) { #page-scan .camera { height:380px; } }
+/* Genre controls stay inside Filters. */
+.trade-filter > label { margin-top:12px; }
+#genre-status { max-width:440px; margin:8px 0 12px; line-height:1.5; }
+#genre-check { font-size:13px; min-height:40px; padding:8px 12px; }
+#book-genre:disabled { opacity:1; color:var(--ink); background:transparent; border-color:transparent; padding-left:0; appearance:none; }

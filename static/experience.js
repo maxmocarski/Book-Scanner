@@ -2,7 +2,7 @@
 
 // The server still owns scans, permissions and books. This file handles the
 // first-use guide, photo viewer and the saved-book editing session.
-const bookFields = ['book-title','book-author','book-isbn','book-shelf','book-available'];
+const bookFields = ['book-title','book-author','book-isbn','book-shelf','book-available','book-genre'];
 let bookEditor = null;
 
 function beginBookDetails(book, allowed) {
@@ -16,7 +16,7 @@ function setBookEditing(editing) {
   bookEditor.editing = editing && bookEditor.allowed;
   $('book-dialog').classList.toggle('editing',bookEditor.editing);
   bookFields.forEach(id => {
-    if ($(id).type === 'checkbox') $(id).disabled = !bookEditor.editing;
+    if ($(id).type === 'checkbox' || $(id).tagName === 'SELECT') $(id).disabled = !bookEditor.editing;
     else $(id).readOnly = !bookEditor.editing;
   });
   $('edit-book').hidden = !bookEditor.allowed || bookEditor.editing;
@@ -83,6 +83,7 @@ async function closeBookDetails() {
 $('edit-book').addEventListener('click',()=>{setBookEditing(true);$('book-title').focus();});
 bookFields.forEach(id=>$(id).addEventListener('input',()=>{
   if (!bookEditor?.editing) return;
+  if (id==='book-genre') state.genreEdited=true;
   clearTimeout(bookEditor.timer);
   $('book-save-status').textContent = 'Unsaved changes…';
   bookEditor.timer = setTimeout(()=>flushBookEdit().catch(()=>{}),650);

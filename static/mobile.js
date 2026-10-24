@@ -10,6 +10,7 @@ function openLibrary(owner) {
   state.books=[];
   state.libraryLoading=true;
   $('library-search').value='';
+  $('genre-filter').value='';
   $('available-only').checked=false;
   navigate('library');
 }
@@ -112,3 +113,4 @@ $('delete-library-form').addEventListener('submit',event=>{
 });
 closeSections();
 if(state.token)startSession().catch(err=>{clearSession();$('auth-error').textContent=err.message;});
+

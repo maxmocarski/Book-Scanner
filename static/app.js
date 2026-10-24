@@ -162,6 +162,7 @@ function clearSession() {
   $('book-grid').replaceChildren();
   $('friend-list').replaceChildren();
   $('trade-list').replaceChildren();
+  resetGenres();
   clearCommunity();
   resetPublic();
   state.tab='auth';
@@ -260,6 +261,7 @@ async function refreshScans() {
   state.scans = scans;
   updateQueueBadge();
   if (state.tab === 'queue') renderQueue();
+  refreshGenreStatus().catch(() => {});
 }
 
 function updateQueueBadge() {
@@ -577,6 +579,7 @@ function openReview(scan) {
 
 function reviewedBody(prefix) {
   return {
+    ...(prefix === 'book' && state.genreEdited ? {genre:$('book-genre').value} : {}),
     title: $(prefix + '-title').value.trim(),
     author: $(prefix === 'review-book' ? 'review-author' : 'book-author').value.trim(),
     isbn: $(prefix === 'review-book' ? 'review-isbn' : 'book-isbn').value.trim() || null,
@@ -609,8 +612,9 @@ function renderLibrary() {
   $('library-description').hidden = !state.owner;
   $('library-description').textContent = shared ? 'Shared bookshelf.' : friend ? 'Books shared with you.' : 'Choose a book to view its details.';
 
+  renderGenreFilters();
   const query = $('library-search').value.toLocaleLowerCase().trim();
-  const books = state.books.filter(b => (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || '', b.shelf_label || b.shelf || ''].join(' ').toLocaleLowerCase().includes(query));
+  const books = state.books.filter(b => genreMatches(b) && (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || '', b.shelf_label || b.shelf || ''].join(' ').toLocaleLowerCase().includes(query));
 
   $('library-count').textContent = books.length + ' ' + (books.length === 1 ? 'book' : 'books') + (query ? ' found' : ' on the shelf');
 
@@ -632,6 +636,8 @@ function renderLibrary() {
 
 function openBook(book) {
   state.book = book;
+  state.genreEdited = false;
+  fillBookGenres(book.genre || '');
   const count=groupCopies(state.books).find(group=>group.some(copy=>copy.id===book.id))?.length || 1;
   $('book-copy-count').textContent=count+(count===1?' copy':' copies');
   const shared = (state.libraries || []).find(l => l.id === book.library_id);
