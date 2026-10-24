@@ -29,8 +29,9 @@ const base=process.argv[2] || 'http://127.0.0.1:8765';
     assert.equal(await page.locator('#public-book-dialog input').count(),0);
     await page.locator('[data-close=public-book-dialog]').click();
     await api('/libraries/'+lib.id+'/visibility',token,{is_public:false},'PATCH');await page.locator('#public-filters summary').click();await page.locator('#public-search-form button').click();
-    await page.waitForFunction(()=>document.querySelector('#public-status').textContent.includes('not found'));assert.equal(await page.locator('#public-results .book-spine').count(),0);
+    await page.waitForFunction(()=>document.querySelector('#public-status').textContent.includes('not found'));assert.equal(await page.locator('#public-results .book-card').count(),0);
     await page.locator('#guest-signin').click();await page.locator('#auth-name').fill('manager_ui');await page.locator('#auth-password').fill('testing123');await page.locator('#auth-submit').click();await page.locator('#workspace').waitFor({state:'visible'});
+    await page.locator('#walkthrough-dialog').waitFor({state:'visible'});await page.locator('#walkthrough-skip').click();
     assert.equal(await page.locator('#guest-navigation').isVisible(),false);
     await page.locator('#workspace .navigation [data-tab=settings]').click();await page.locator('#page-settings summary').filter({hasText:/^Shared libraries$/}).click();
     await page.locator('#shared-libraries summary').filter({hasText:'Public Town Library'}).click();
@@ -42,3 +43,4 @@ const base=process.argv[2] || 'http://127.0.0.1:8765';
     assert.deepEqual(errors,[]);console.log('Public iPhone-size flow passed: anonymous browsing/photos, privacy revocation, sign-in, manager toggle, and mobile widths.');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
+
