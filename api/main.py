@@ -1,5 +1,6 @@
 """BookBridge: private physical-book catalog and friend-to-friend swaps."""
 import asyncio
+from typing import Literal
 from contextlib import contextmanager, asynccontextmanager, suppress
 import fcntl
 import hashlib
@@ -12,7 +13,7 @@ import sqlite3
 import time
 import sys
 from api import community, mobile, public
-from core import shelves, batch
+from core import shelves, batch, genres
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -103,6 +104,7 @@ class Credentials(BaseModel):
 class BookInput(Metadata):
     title: str = Field(min_length=1, max_length=500)
     author: str = Field(min_length=1, max_length=500)
+    genre: genres.Genre | Literal[''] | None = None
     available: bool = False
     shelf: str | None = Field(default=None, max_length=100)
     @field_validator("shelf")
@@ -313,6 +315,8 @@ def save(scan_id: str, body: BookInput, me=Depends(user)):
         position = shelves.location(c,row,shelf)
         c.execute('INSERT INTO books(id,owner,title,author,isbn,available,created,scan_audit,library_id,shelf,shelf_position,added_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                   (identifier,row['owner'],body.title,body.author,isbn,int(body.available and not row['library_id']),now(),json.dumps(audit),row['library_id'],shelf,position,batch.next_order(c)))
+        if body.genre is not None:
+            c.execute('UPDATE books SET genre=?,genre_revision=1 WHERE id=?',(body.genre,identifier))
         c.execute('INSERT INTO book_images SELECT ?,position,view,image FROM scan_images WHERE scan_id=?', (identifier,scan_id))
         c.execute('DELETE FROM scans WHERE id=?', (scan_id,))
     return {'book_id': identifier}
@@ -371,6 +375,8 @@ def edit(book_id: str, body: BookInput, me=Depends(user)):
         shelf = row['shelf'] if body.shelf is None else body.shelf
         position = shelves.location(c,row,shelf)
         c.execute('UPDATE books SET title=?,author=?,isbn=?,available=?,shelf=?,shelf_position=? WHERE id=?', (body.title,body.author,isbn,int(body.available and not row['library_id']),shelf,position,book_id))
+        if body.genre is not None:
+            c.execute('UPDATE books SET genre=?,genre_revision=genre_revision+1 WHERE id=?',(body.genre,book_id))
         c.execute("UPDATE trades SET status='cancelled' WHERE status='pending' AND (wanted=? OR offered=?)", (book_id,book_id))
         return public_book(c,book(c,book_id))
 @app.delete('/books/{book_id}', status_code=204)
@@ -459,3 +465,5 @@ mobile.install(app, sys.modules[__name__])
 
 public.install(app, sys.modules[__name__])
 
+
+genres.install(app, sys.modules[__name__])

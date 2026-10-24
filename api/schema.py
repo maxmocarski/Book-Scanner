@@ -46,5 +46,7 @@ def initialize(db):
         shelves.initialize(c)
         from core import batch
         batch.initialize(c)
+        from core import genres
+        genres.initialize(c)
         c.execute('PRAGMA user_version=2')
 
