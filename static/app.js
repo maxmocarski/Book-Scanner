@@ -580,7 +580,6 @@ function reviewedBody(prefix) {
     title: $(prefix + '-title').value.trim(),
     author: $(prefix === 'review-book' ? 'review-author' : 'book-author').value.trim(),
     isbn: $(prefix === 'review-book' ? 'review-isbn' : 'book-isbn').value.trim() || null,
-    ...(prefix === 'book' ? {genre:$('book-genre').value.trim(),shelf_position:$('book-shelf-position').value?Number($('book-shelf-position').value):null} : {}),
     shelf: $(prefix === 'review-book' ? 'review-shelf' : 'book-shelf').value.trim(),
     available: $(prefix === 'review-book' ? 'review-available' : 'book-available').checked
   };
@@ -611,7 +610,7 @@ function renderLibrary() {
   $('library-description').textContent = shared ? 'Shared bookshelf.' : friend ? 'Books shared with you.' : 'Choose a book to view its details.';
 
   const query = $('library-search').value.toLocaleLowerCase().trim();
-  const books = state.books.filter(b => (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || '', b.genre || '', b.shelf_label || b.shelf || ''].join(' ').toLocaleLowerCase().includes(query));
+  const books = state.books.filter(b => (!$('available-only').checked || b.available && !reserved(b.id)) && [b.title, b.author, b.isbn || '', b.shelf_label || b.shelf || ''].join(' ').toLocaleLowerCase().includes(query));
 
   $('library-count').textContent = books.length + ' ' + (books.length === 1 ? 'book' : 'books') + (query ? ' found' : ' on the shelf');
 
@@ -643,8 +642,6 @@ function openBook(book) {
   $('book-author').value = book.author;
   $('book-isbn').value = book.isbn || '';
   $('book-shelf').value = book.shelf || '';
-  $('book-genre').value = book.genre || '';
-  $('book-shelf-position').value = book.shelf_position || '';
   $('book-shelf-location').textContent = book.shelf_label ? 'Current location: '+book.shelf_label : '';
   $('book-available').checked = Boolean(book.available);
 
@@ -945,5 +942,4 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', stopCamera);
 
 renderPhotos();
-
 

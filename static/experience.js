@@ -2,7 +2,7 @@
 
 // The server still owns scans, permissions and books. This file handles the
 // first-use guide, photo viewer and the saved-book editing session.
-const bookFields = ['book-title','book-author','book-isbn','book-shelf','book-genre','book-shelf-position','book-available'];
+const bookFields = ['book-title','book-author','book-isbn','book-shelf','book-available'];
 let bookEditor = null;
 
 function beginBookDetails(book, allowed) {
@@ -177,4 +177,3 @@ $('walkthrough-skip').addEventListener('click',()=>endWalkthrough());
 $('walkthrough-dialog').addEventListener('cancel',event=>{event.preventDefault();endWalkthrough();});
 $('replay-walkthrough').addEventListener('click',()=>offerWalkthrough(true));
 $('profile-dialog').addEventListener('close',()=>{if(state.me?.profile_complete)offerWalkthrough();});
-

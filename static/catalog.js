@@ -1,9 +1,11 @@
 'use strict';
 
 let catalogView='cards';
-try{catalogView=localStorage.getItem('bookbridge-catalog-view')==='list'?'list':'cards';}catch{}
+// Covers is the default each time the app opens.
 function applyCatalogView(root){
   root.classList.toggle('catalog-list',catalogView==='list');
+  root.classList.toggle('spine-view',catalogView==='shelves');
+  document.querySelectorAll('.shelf-zoom-controls').forEach(control=>control.hidden=catalogView!=='shelves');
   document.querySelectorAll('[data-catalog-view]').forEach(control=>{
     const active=control.dataset.catalogView===catalogView;
     control.setAttribute('aria-pressed',String(active));control.classList.toggle('active',active);
@@ -51,9 +53,10 @@ function makeLibraryCard(library,onOpen){
 }
 for(const control of document.querySelectorAll('[data-catalog-view]'))control.addEventListener('click',()=>{
   catalogView=control.dataset.catalogView;
-  try{localStorage.setItem('bookbridge-catalog-view',catalogView);}catch{}
+
   applyCatalogView($('book-grid'));applyCatalogView($('public-results'));
   if(state.me && state.tab==='library')renderLibrary();
   if(state.tab==='public')renderPublic();
 });
 applyCatalogView($('book-grid'));applyCatalogView($('public-results'));
+
