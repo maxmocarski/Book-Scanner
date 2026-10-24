@@ -42,8 +42,11 @@ def initialize(db):
         for table in ('books','scans'):
             if 'shelf' not in {r['name'] for r in c.execute('PRAGMA table_info('+table+')')}:
                 c.execute("ALTER TABLE "+table+" ADD COLUMN shelf TEXT NOT NULL DEFAULT ''")
+        if 'genre' not in {r['name'] for r in c.execute('PRAGMA table_info(books)')}:
+            c.execute("ALTER TABLE books ADD COLUMN genre TEXT NOT NULL DEFAULT ''")
         from core import shelves
         shelves.initialize(c)
         from core import batch
         batch.initialize(c)
         c.execute('PRAGMA user_version=2')
+
