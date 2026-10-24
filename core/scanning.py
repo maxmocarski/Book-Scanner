@@ -288,6 +288,9 @@ class Scanner:
             try:
                 if await self.process_next():
                     continue
+                from core import genres
+                if await genres.process_next(self):
+                    continue
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -318,3 +321,4 @@ class Scanner:
                 c.execute('INSERT INTO scan_images VALUES(?,?,?,?)',(identifier,i,view,image))
         self.wake.set()
         return identifier
+
