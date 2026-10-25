@@ -6,15 +6,15 @@
   <meta name="theme-color" content="#283d32">
   <title>BookBridge — your books, connected</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.8.2">
-  <script src="/static/app.js?v=0.8.2" defer></script>
-  <script src="/static/catalog.js?v=0.8.2" defer></script>
-  <script src="/static/community.js?v=0.8.2" defer></script>
-  <script src="/static/public.js?v=0.8.2" defer></script>
-  <script src="/static/bookshelf.js?v=0.8.2" defer></script>
-  <script src="/static/mobile.js?v=0.8.2" defer></script>
-  <script src="/static/experience.js?v=0.8.2" defer></script>
-  <script src="/static/genres.js?v=0.8.2" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.8.4">
+  <script src="/static/app.js?v=0.8.4" defer></script>
+  <script src="/static/catalog.js?v=0.8.4" defer></script>
+  <script src="/static/community.js?v=0.8.4" defer></script>
+  <script src="/static/public.js?v=0.8.4" defer></script>
+  <script src="/static/bookshelf.js?v=0.8.4" defer></script>
+  <script src="/static/mobile.js?v=0.8.4" defer></script>
+  <script src="/static/experience.js?v=0.8.4" defer></script>
+  <script src="/static/genres.js?v=0.8.4" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -112,7 +112,7 @@
           </div>
 
           <div class="panel scan-panel">
-            <label>Scan mode<select id="scan-mode-kind"><option value="single">One book</option><option value="shelf">Shelf spines · up to 5</option></select></label>
+            <label>Scan mode<select id="scan-mode-kind"><option value="single">One book</option><option value="shelf">Shelf scan</option></select></label>
             <div id="shelf-photo-options" hidden><label>Books in photo<select id="shelf-book-count"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label></div>
             <p id="scan-limit" class="scan-warning" hidden>No more than 5 books per photo. Spine reading can miss text or mix books. Count the visible books and review each result. Photograph unclear books individually.</p>
             <h2>Your photos</h2>
@@ -216,7 +216,6 @@
       <section id="page-trades" class="page" hidden><h1>Your trades</h1><p class="muted">Requests and handoffs, in one place.</p><div id="trade-list" class="trade-list"></div></section>
       <section id="page-settings" class="page" hidden>
         <h1>Settings</h1>
-        <div class="button-row settings-actions"><button data-tab="help" class="secondary">Help &amp; walkthrough</button><button data-tab="stats" class="secondary">My reading stats</button><button id="admin-open" data-tab="admin" class="secondary" hidden>Admin panel</button><button id="logout" class="text-button danger">Sign out</button></div>
         <form id="settings-form" class="settings-layout">
           <details class="panel"><summary>Your profile</summary>
             <label>First name<input id="setting-name" autocomplete="given-name" maxlength="40" required></label><label>Last name<input id="setting-lastname" autocomplete="family-name" maxlength="40" required></label>
@@ -246,6 +245,7 @@
         </form>
 
         <details class="panel"><summary>Shared libraries</summary><p class="muted">An admin creates a library and its manager gives people permission to scan into its queue.</p><div id="shared-libraries"></div></details>
+        <div class="button-row settings-actions"><button data-tab="help" class="secondary">Help &amp; walkthrough</button><button data-tab="stats" class="secondary">My reading stats</button><button id="admin-open" data-tab="admin" class="secondary" hidden>Admin panel</button><button id="logout" class="text-button danger">Sign out</button></div>
       </section>
       <section id="page-help" class="page" hidden>
         <button data-tab="settings" class="text-button">← Settings</button>
