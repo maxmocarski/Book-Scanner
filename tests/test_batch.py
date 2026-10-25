@@ -82,7 +82,7 @@ def test_bad_spine_boundaries_fail_without_partial_children(client,monkeypatch):
     parent=shelf(c,a,2).json();process(c)
     assert c.get(parent['status_url'],headers=a).json()['status']=='failed'
     assert len(c.get('/scans',headers=a).json())==1
-    async def too_many(self,*args,**kwargs):return ShelfPhoto(too_many=True)
+    async def too_many(self,*args,**kwargs):return ShelfPhoto(books=[],too_many=True)
     monkeypatch.setattr(Scanner,'generate',too_many)
     c.post(parent['status_url']+'/retry',headers=a);process(c)
     assert 'no more than 5' in c.get(parent['status_url'],headers=a).json()['error']
@@ -120,3 +120,32 @@ def test_five_spines_without_shelf_keep_unclear_book_for_manual_review(client,mo
     assert c.post(unclear['status_url']+'/save',headers=a,json={'title':'Manually checked book','author':'Checked author'}).status_code==201
     books=c.get('/books',headers=a).json()
     assert len(books)==5 and max(books,key=lambda b:b['added_order'])['title']=='Manually checked book'
+
+
+
+def test_zero_detection_retries_layout_and_rotated_spine_ocr(client,monkeypatch):
+    from core.batch import ShelfLayout,SpineBoundary
+    c=client;_,a=account(c,'reader');calls=[]
+    async def generate(self,model,prompt,schema,images=None):
+        calls.append(schema)
+        if schema is ShelfPhoto:return ShelfPhoto(books=[])
+        if schema is ShelfLayout:return ShelfLayout(books=[SpineBoundary(left=i/3,right=(i+1)/3) for i in range(3)])
+        assert schema is Metadata and len(images)==3
+        return Metadata(title='Read from spine',author='Author')
+    monkeypatch.setattr(Scanner,'generate',generate)
+    parent=shelf(c,a).json();process(c)
+    result=c.get(parent['status_url'],headers=a).json()
+    assert len(result['child_scan_ids'])==3
+    assert calls==[ShelfPhoto,ShelfLayout,Metadata,Metadata,Metadata]
+    assert c.get('/books',headers=a).json()==[]
+
+
+def test_empty_layout_does_not_create_fake_books(client,monkeypatch):
+    from core.batch import ShelfLayout
+    c=client;_,a=account(c,'reader')
+    async def generate(self,model,prompt,schema,images=None):return schema(books=[])
+    monkeypatch.setattr(Scanner,'generate',generate)
+    parent=shelf(c,a).json();process(c)
+    result=c.get(parent['status_url'],headers=a).json()
+    assert result['status']=='failed' and 'second pass' in result['error']
+    assert len(c.get('/scans',headers=a).json())==1
