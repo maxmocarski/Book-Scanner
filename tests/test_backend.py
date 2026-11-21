@@ -174,3 +174,52 @@ def test_frontend_and_private_trade_labels(client):
     assert rows[0]['sender_username']=='reader'
     assert rows[0]['recipient_username']=='friend'
     assert rows[0]['wanted_title']=='The Great Gatsby'
+
+def test_isbn_closeup_scan_save_and_shelf_move(client, monkeypatch):
+    _, owner = account(client, 'scanner')
+    _, other = account(client, 'visitor')
+    received = []
+    async def identify(self, images):
+        received.extend(images)
+        return Metadata(title='Test edition', author='An Author', isbn='9780743273565')
+    monkeypatch.setattr(Scanner, 'identify', identify)
+    book_id = add(client, owner, ('front','spine','back','isbn_photo'))
+    assert len(received) == 4
+    book = client.get('/books', headers=owner).json()[0]
+    assert [photo['view'] for photo in book['images']] == ['front','spine','back']
+    assert client.get(f'/books/{book_id}/images/3', headers=owner).status_code == 404
+    with main.db() as db:
+        assert db.execute('SELECT image FROM book_isbn_photos WHERE book_id=?',(book_id,)).fetchone()[0] == received[-1]
+        assert db.execute('SELECT count(*) FROM scan_isbn_photos').fetchone()[0] == 0
+    path = f'/books/{book_id}/shelf'
+    assert client.patch(path, headers=other, json={'shelf':'Desk'}).status_code == 404
+    assert client.patch(path, headers=owner, json={'shelf':'Desk'}).status_code == 200
+    assert client.get('/books', headers=owner).json()[0]['shelf_label'] == 'Desk (1)'
+    assert client.delete(f'/books/{book_id}', headers=owner).status_code == 204
+    with main.db() as db:
+        assert db.execute('SELECT count(*) FROM book_isbn_photos').fetchone()[0] == 0
+
+def test_optional_cover_suggestion_and_restore(client, monkeypatch):
+    from core import covers
+    _, owner = account(client,'coverreader')
+    _, stranger = account(client,'stranger')
+    book = add(client,owner)
+    base = '/books/'+book
+    original = client.get(base+'/image',headers=owner).content
+    async def match(scanner, row):
+        assert row['original'] == original
+        return b'candidate', 'https://covers.openlibrary.org/b/id/1-L.jpg'
+    monkeypatch.setattr(covers,'find_match',match)
+    def work():
+        return client.portal.call(covers.process_next,main.app.state.scanner)
+    assert not work()
+    assert client.post(base+'/cover/search',headers=stranger).status_code == 404
+    assert client.post(base+'/cover/search',headers=owner).json()['cover_status']=='queued'
+    assert work()
+    assert client.get(base+'/suggested-cover',headers=stranger).status_code == 404
+    assert client.get(base+'/suggested-cover',headers=owner).content == b'candidate'
+    assert client.get(base+'/image',headers=owner).content == original
+    assert client.post(base+'/cover/apply',headers=owner).json()['cover_status']=='applied'
+    assert client.get(base+'/image',headers=owner).content == b'candidate'
+    assert client.post(base+'/cover/cancel',headers=owner).json()['cover_status'] is None
+    assert client.get(base+'/image',headers=owner).content == original
