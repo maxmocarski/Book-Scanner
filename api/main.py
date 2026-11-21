@@ -75,7 +75,7 @@ async def expiry_loop():
         await asyncio.sleep(60)
         await asyncio.to_thread(cleanup_expired)
 app = FastAPI(title='BookBridge', version='0.7.0', lifespan=lifespan,
-              description='Private books, durable scan queue, up to three photos, Gemma + text enrichment, and friend swaps. Photos require Bearer authentication.')
+              description='Private books, durable scan queue, three book views and an optional ISBN close-up, Gemma + text enrichment, and friend swaps. Photos require Bearer authentication.')
 STATIC = Path(__file__).parent.parent / 'static'
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 @app.get('/', include_in_schema=False)
@@ -224,7 +224,7 @@ def public_scan(c, row):
     return result
 @app.post('/scans', status_code=202)
 async def scan(request: Request, front: UploadFile | None = File(None), spine: UploadFile | None = File(None),
-               back: UploadFile | None = File(None), enrichment: Mode | None = Form(None), library_id: str | None = Form(None), shelf: str = Form(default="", max_length=100), scan_mode: str = Form(default="single"), book_count: int = Form(default=1,ge=1,le=5),
+               back: UploadFile | None = File(None), isbn_photo: UploadFile | None = File(None), enrichment: Mode | None = Form(None), library_id: str | None = Form(None), shelf: str = Form(default="", max_length=100), scan_mode: str = Form(default="single"), book_count: int = Form(default=1,ge=1,le=5),
                cover: UploadFile | None = File(None, description='Legacy name for front. Do not combine with front.'),
                details: UploadFile | None = File(None, description='Legacy name for back. Do not combine with back.'), me=Depends(user)):
     if scan_mode not in ('single','shelf'):fail(422,'Choose single-book or shelf mode.')
@@ -234,20 +234,20 @@ async def scan(request: Request, front: UploadFile | None = File(None), spine: U
         preferences = community.profile_for(c,me)
     form = await request.form()
     uploads = [(name,value) for name,value in form.multi_items() if isinstance(value,FormUploadFile)]
-    if not 1 <= len(uploads) <= 3:
-        fail(422, 'Attach one to three photos of one book: front, optional spine, optional back.')
+    if not 1 <= len(uploads) <= 4:
+        fail(422, 'Attach a front photo and optionally a spine, back and ISBN close-up.')
     names = [name for name,value in uploads]
-    if len(set(names)) != len(names) or any(name not in ('front','spine','back','cover','details') for name in names):
-        fail(422, 'Each book view accepts one photo. Use front, spine and back.')
+    if len(set(names)) != len(names) or any(name not in ('front','spine','back','cover','details','isbn_photo') for name in names):
+        fail(422, 'Each book view accepts one photo. Use front, spine, back and isbn_photo.')
     if (front and cover) or (back and details):
         fail(422, 'Do not combine a legacy photo name with its replacement.')
     front = front or cover
     back = back or details
     if not front:
         fail(422, 'A front cover photo is required.')
-    if scan_mode=='shelf' and (spine or back):fail(422,'Use one shelf photo with no more than 5 spines.')
+    if scan_mode=='shelf' and (spine or back or isbn_photo):fail(422,'Use one shelf photo with no more than 5 spines.')
     photos = []
-    for view,upload in (('front',front),('spine',spine),('back',back)):
+    for view,upload in (('front',front),('spine',spine),('back',back),('isbn_photo',isbn_photo)):
         if upload:
             raw = await upload.read(10*1024*1024+1)
             if len(raw)>10*1024*1024:
@@ -318,6 +318,7 @@ def save(scan_id: str, body: BookInput, me=Depends(user)):
         if body.genre is not None:
             c.execute('UPDATE books SET genre=?,genre_revision=1 WHERE id=?',(body.genre,identifier))
         c.execute('INSERT INTO book_images SELECT ?,position,view,image FROM scan_images WHERE scan_id=?', (identifier,scan_id))
+        c.execute('INSERT INTO book_isbn_photos SELECT ?,image FROM scan_isbn_photos WHERE scan_id=?',(identifier,scan_id))
         c.execute('DELETE FROM scans WHERE id=?', (scan_id,))
     return {'book_id': identifier}
 @app.delete('/scans/{scan_id}', status_code=204)
@@ -338,6 +339,11 @@ def public_book(c, row):
     result['shelf_label'] = shelves.label(row['shelf'],row['shelf_position'])
     result['scan_audit'] = json.loads(row['scan_audit'])
     result['images'] = [{'position':r['position'],'view':r['view'],'url':f'/books/{row["id"]}/images/{r["position"]}'} for r in c.execute('SELECT position,view FROM book_images WHERE book_id=? ORDER BY position',(row['id'],))]
+    job = c.execute('SELECT status,token FROM cover_jobs WHERE book_id=?',(row['id'],)).fetchone()
+    result['cover_token'] = job['token'] if job else None
+    result['cover_status'] = job['status'] if job else None
+    if job and job['status']=='applied' and result['images']:
+        result['images'][0]['url'] += '?cover='+job['token']
     result['image_url'] = '/books/'+row['id']+'/image'
     return result
 @app.get('/books')
@@ -361,6 +367,50 @@ def book_photo(book_id: str, position: int, me=Depends(user)):
         if not image:
             fail(404,'Image not found.')
         return Response(image['image'], media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
+@app.post('/books/{book_id}/cover/{action}')
+def cover_action(book_id: str, action: Literal['search','apply','cancel'], me=Depends(user)):
+    with db() as c:
+        row = book(c,book_id)
+        community.book_edit(c,row,me)
+        if locked(c,book_id): fail(409,'This book is reserved.')
+        job = c.execute('SELECT * FROM cover_jobs WHERE book_id=?',(book_id,)).fetchone()
+        if action=='search':
+            if job and job['status'] not in ('missing','failed'): fail(409,'A cover search already exists.')
+            c.execute("INSERT OR REPLACE INTO cover_jobs(book_id,token,status) VALUES(?,?,'queued')",(book_id,uid()))
+        elif action=='apply':
+            if not job or job['status']!='suggested': fail(409,'No suggested cover.')
+            original = c.execute('SELECT image FROM book_images WHERE book_id=? AND position=0',(book_id,)).fetchone()
+            c.execute('UPDATE book_images SET image=? WHERE book_id=? AND position=0',(job['image'],book_id))
+            c.execute("UPDATE cover_jobs SET status='applied',image=? WHERE book_id=?",(original['image'],book_id))
+        else:
+            if job and job['status']=='applied':
+                c.execute('UPDATE book_images SET image=? WHERE book_id=? AND position=0',(job['image'],book_id))
+            c.execute('DELETE FROM cover_jobs WHERE book_id=?',(book_id,))
+        return public_book(c,row)
+
+@app.get('/books/{book_id}/suggested-cover')
+def suggested_cover(book_id: str, me=Depends(user)):
+    with db() as c:
+        community.book_edit(c,book(c,book_id),me)
+        job = c.execute("SELECT image FROM cover_jobs WHERE book_id=? AND status='suggested'",(book_id,)).fetchone()
+        if not job: fail(404,'No suggested cover.')
+        return Response(job['image'],media_type='image/jpeg',headers={'Cache-Control':'no-store'})
+
+class ShelfMove(BaseModel):
+    shelf: str = Field(max_length=100)
+
+@app.patch('/books/{book_id}/shelf')
+def move_to_shelf(book_id: str, body: ShelfMove, me=Depends(user)):
+    with db() as c:
+        row = book(c,book_id)
+        community.book_edit(c,row,me)
+        if locked(c,book_id):
+            fail(409,'Cancel the accepted trade before editing.')
+        shelf = body.shelf.strip()
+        position = shelves.location(c,row,shelf)
+        c.execute('UPDATE books SET shelf=?, shelf_position=? WHERE id=?',(shelf,position,book_id))
+    return {'shelf':shelf,'shelf_position':position}
+
 @app.patch('/books/{book_id}')
 def edit(book_id: str, body: BookInput, me=Depends(user)):
     try:
@@ -387,6 +437,8 @@ def delete_book(book_id: str, me=Depends(user)):
             fail(409,'Book has trade history. Set available=false to remove it from trading.')
         c.execute('UPDATE books SET removed=1,available=0 WHERE id=?',(book_id,))
         c.execute('DELETE FROM book_images WHERE book_id=?',(book_id,))
+        c.execute('DELETE FROM book_isbn_photos WHERE book_id=?',(book_id,))
+        c.execute('DELETE FROM cover_jobs WHERE book_id=?',(book_id,))
 @app.post('/trades', status_code=201)
 def propose(body: TradeInput, me=Depends(user)):
     with db() as c:

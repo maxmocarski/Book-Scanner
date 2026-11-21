@@ -434,6 +434,8 @@ def install(app, m):
             m.book(c,book_id)
             c.execute('UPDATE books SET removed=1,available=0 WHERE id=?',(book_id,))
             c.execute('DELETE FROM book_images WHERE book_id=?',(book_id,))
+            c.execute('DELETE FROM book_isbn_photos WHERE book_id=?',(book_id,))
+            c.execute('DELETE FROM cover_jobs WHERE book_id=?',(book_id,))
             c.execute("UPDATE trades SET status='cancelled' WHERE (wanted=? OR offered=?) AND status IN ('pending','accepted')",(book_id,book_id))
             c.execute('INSERT INTO admin_audit(created,admin,action,target) VALUES(?,?,?,?)',(m.now(),me['id'],'remove_book',book_id))
 
