@@ -24,7 +24,7 @@ const state = {
   busyUpload: false
 };
 
-const views = { front: 'Front', spine: 'Spine', back: 'Back' };
+const views = { front: 'Front', spine: 'Spine', back: 'Back', isbn_photo: 'ISBN close-up' };
 
 const e = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -130,6 +130,8 @@ function clearPhotos() {
 
 function clearSession() {
   state.epoch++;
+  delete selections.library;
+  delete selections.queue;
   clearInterval(state.poll);
   state.poll = null;
   stopCamera();
@@ -325,7 +327,9 @@ function renderPhotos() {
   $('scan-mode-kind').disabled=state.busyUpload;
   $('shelf-book-count').disabled=state.busyUpload;
   const shelfPhoto=$('scan-mode-kind').value==='shelf';
-  $('camera-video').style.objectFit=shelfPhoto?'contain':'cover';
+  const isbnMode = !shelfPhoto && state.view === 'isbn_photo';
+  $('camera-video').style.objectFit = shelfPhoto ? 'contain' : 'cover';
+  $('camera-hint').textContent = isbnMode ? 'Center the printed ISBN digits. This photo stays hidden.' : 'Keep the whole book in view.';
   for (const view of (shelfPhoto?['front']:Object.keys(views))) {
     const wrap = e('div', 'photo-slot' + (view === state.view ? ' active' : ''));
     const choice = button('', 'photo-choice', () => {
@@ -333,7 +337,7 @@ function renderPhotos() {
       renderPhotos();
     });
 
-    choice.setAttribute('aria-label', 'Select ' + view + ' photo');
+    choice.setAttribute('aria-label', 'Select ' + (view === 'isbn_photo' ? 'ISBN close-up' : view) + ' photo');
     const photo = state.photos[view];
 
     if (photo) {
@@ -360,12 +364,12 @@ function renderPhotos() {
     root.append(wrap);
   }
 
-  $('upload-photo').textContent = shelfPhoto?'Upload shelf photo':'Upload ' + state.view + ' photo';
+  $('upload-photo').textContent = shelfPhoto?'Upload shelf photo':'Upload ' + views[state.view].toLowerCase() + ' photo';
   $('camera-view').textContent = shelfPhoto?'Shelf photo':state.view === 'front' ? 'Front cover' : views[state.view];
   $('queue-book').disabled = !state.photos.front || state.busyUpload;
 }
 
-async function setPhoto(file, view) {
+async function setPhoto(file, view, photos = state.photos) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Please use a JPG, PNG or WebP photo.');
   if (file.size > 10 * 1024 * 1024) throw new Error('Choose a photo smaller than 10 MB.');
 
@@ -386,11 +390,11 @@ async function setPhoto(file, view) {
 
   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .88));
   if (!blob) throw new Error('This photo could not be prepared.');
-  if (epoch !== state.epoch) return;
+  if (epoch !== state.epoch || photos !== state.photos || state.busyUpload) return;
 
   if (state.photos[view]) URL.revokeObjectURL(state.photos[view].url);
   state.photos[view] = { blob, url: URL.createObjectURL(blob) };
-  state.view = $('scan-mode-kind').value==='shelf'?'front':Object.keys(views).find(v => !state.photos[v]) || view;
+  state.view = $('scan-mode-kind').value==='shelf'?'front':['front','spine','back'].find(v => !state.photos[v]) || view;
   renderPhotos();
 }
 
@@ -428,18 +432,115 @@ async function capturePhoto() {
   const video = $('camera-video');
   if (!video.videoWidth) return;
   const canvas = document.createElement('canvas');
+  const view = state.view;
+  const photos = state.photos;
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   canvas.getContext('2d').drawImage(video, 0, 0);
   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .9));
-  if (blob) await setPhoto(new File([blob], 'capture.jpg', { type: 'image/jpeg' }), state.view);
+  if (blob) await setPhoto(new File([blob], 'capture.jpg', { type: 'image/jpeg' }), view, photos);
 }
+
+// Selection mode lists individual copies, even when the catalog groups editions.
+const selections = {};
+function renderSelection(page, root, items, scope, actions, describe) {
+  const bar = $(page + '-selection');
+  bar.replaceChildren();
+  let selection = selections[page];
+  if (selection?.scope !== scope) {
+    selection = selections[page] = {scope, active:false, ids:new Set(), busy:false};
+  }
+  const {ids} = selection;
+  const visible = new Set(items.map(item => item.id));
+  for (const id of ids) if (!visible.has(id)) ids.delete(id);
+  if (!items.length) { selection.active = false; return false; }
+  const redraw = page === 'queue' ? renderQueue : renderLibrary;
+  function control(label, callback, disabled=false) {
+    const el = button(label, 'secondary', callback);
+    el.disabled = selection.busy || disabled;
+    bar.append(el);
+  }
+  control(selection.active ? 'Done' : 'Select', () => {
+    selection.active = !selection.active;
+    ids.clear();
+    redraw();
+  });
+  if (!selection.active) return false;
+  const selected = items.filter(item => ids.has(item.id));
+  const all = ids.size === items.length;
+  control(all ? 'Clear selection' : 'Select all', () => {
+    if (all) ids.clear();
+    else items.forEach(item => ids.add(item.id));
+    redraw();
+  });
+  bar.append(e('span','small',ids.size + ' selected'));
+  for (const action of actions) {
+    control(action.label, async () => {
+      if (selection.busy || !selected.length) return;
+      const value = action.prepare(selected.length);
+      if (value === null || value === false) return;
+      selection.busy = true;
+      redraw();
+      const epoch = state.epoch;
+      let completed = 0, failure = '';
+      try {
+        for (const item of selected) {
+          if (state.epoch !== epoch) return;
+          try {
+            await action.run(item,value);
+            ids.delete(item.id);
+            completed++;
+          } catch (err) { failure = err.message; break; }
+        }
+        if (state.epoch !== epoch) return;
+        await refreshAll();
+        toast(completed + ' of ' + selected.length + ' completed.' + (failure ? ' ' + failure : ''));
+      } finally {
+        selection.busy = false;
+        if (state.epoch === epoch) redraw();
+      }
+    }, !selected.length || selected.some(item => action.eligible && !action.eligible(item)));
+  }
+  const list = e('div','selection-list');
+  for (const item of items) {
+    const row = e('label','selection-row');
+    const check = e('input');
+    check.type = 'checkbox';
+    check.checked = ids.has(item.id);
+    check.disabled = selection.busy;
+    check.addEventListener('change', () => {
+      if (check.checked) ids.add(item.id); else ids.delete(item.id);
+      redraw();
+      root.querySelectorAll('input')[items.indexOf(item)]?.focus();
+    });
+    row.append(check, e('span','',describe(item)));
+    list.append(row);
+  }
+  root.append(list);
+  return true;
+}
+
+const reviewActions = [
+  {label:'Save selected', eligible:s => s.status === 'ready' && s.metadata.title?.trim() && s.metadata.author?.trim(),
+    prepare:n => confirm('Save ' + n + ' books with the titles, authors and ISBNs shown?'),
+    run:s => api('/scans/'+s.id+'/save',{method:'POST',body:s.metadata})},
+  {label:'Discard selected', prepare:n => confirm('Discard ' + n + ' scans and their photos?'),
+    run:s => api('/scans/'+s.id,{method:'DELETE'})}
+];
+const libraryActions = [
+  {label:'Move to shelf', prepare:n => prompt('Shelf name for ' + n + ' books (leave blank for Miscellaneous)'),
+    run:(b,shelf) => api('/books/'+b.id+'/shelf',{method:'PATCH',body:{shelf}})},
+  {label:'Remove selected', prepare:n => confirm('Remove ' + n + ' books and their photos from this library?'),
+    run:b => api('/books/'+b.id,{method:'DELETE'})}
+];
 
 function renderQueue() {
   const root = $('queue-list');
   root.replaceChildren();
 
   const queueScans = state.scans.filter(s => (s.library_id || '') === $('queue-library').value);
+  if (renderSelection('queue',root,queueScans,$('queue-library').value,reviewActions,s =>
+    [s.metadata.title || 'Untitled scan',s.metadata.author,s.metadata.isbn,s.status,s.duplicate && 'Possible duplicate',...(s.warnings || [])].filter(Boolean).join(' · '))) return;
   if (!queueScans.length) {
     empty(root, 'A clear queue.', 'Photograph a book to get started.', button('Scan a book', 'primary', () => navigate('scan')));
     return;
@@ -622,6 +723,10 @@ function renderLibrary() {
   grid.replaceChildren();
   applyCatalogView(grid);
 
+  const editable = state.libraryLoading || friend ? [] : books.filter(b =>
+    (b.owner === state.me.id || shared?.owner === state.me.id) && !reserved(b.id));
+  if (renderSelection('library',grid,editable,state.owner,libraryActions,b =>
+    [b.title,b.author,b.shelf_label || b.shelf || 'Miscellaneous',b.isbn].filter(Boolean).join(' · '))) return;
   if (state.libraryLoading) { grid.append(e('p','muted','Loading this library…')); return; }
   if (!books.length) {
     empty(grid, state.books.length ? 'No matches yet.' : friend ? 'An empty shelf.' : 'Scan your library', state.books.length ? 'Try another title or author.' : friend ? 'Your friend hasn’t added any books yet.' : 'Start with one cover or a few book spines. Review the results, then find every saved book here.', !friend && !state.books.length ? button('Scan your first books', 'primary', () => { $('scan-library').value = shared?.id || ''; navigate('scan'); }) : null);
@@ -632,6 +737,33 @@ function renderLibrary() {
   const groups = groupCopies(books);
   $('library-count').textContent = groups.length + (groups.length===1?' title':' titles');
   renderBookshelf(grid,groups,copies=>copies.length>1?openCopies(copies):openBook(copies[0]));
+}
+
+function showCoverSearch(book, allowed) {
+  const root = $('book-cover-search');
+  root.replaceChildren();
+  if (!allowed) return;
+  const status = book.cover_status;
+  const messages = {queued:'Searching for a matching cover…', missing:'No matching cover found.',
+    failed:'Cover search unavailable. You can retry.', suggested:'Suggested cover', applied:'Online cover in use.'};
+  root.append(e('p','small muted',messages[status] || 'Optional cover search shares the title, author and ISBN online. Your photos stay local.'));
+  async function update(action) {
+    const result = action ? await api('/books/'+book.id+'/cover/'+action,{method:'POST'}) :
+      (await api('/books'+(book.library_id?'?library_id='+encodeURIComponent(book.library_id):''))).find(b=>b.id===book.id);
+    if (!result || state.book?.id!==book.id || !$('book-dialog').open) return;
+    state.book=result;
+    showCoverSearch(result,allowed);
+    photoStrip($('book-photos'),result.images);
+    await refreshAll();
+  }
+  if (status==='suggested') {
+    root.append(image('/books/'+book.id+'/suggested-cover?v='+book.cover_token,'queue-cover','Suggested cover'));
+    root.append(button('Use this cover','secondary',()=>update('apply')));
+  }
+  if (status==='queued') root.append(button('Check result','secondary',()=>update(null)));
+  if (['queued','suggested','applied'].includes(status))
+    root.append(button(status==='applied'?'Restore original photo':status==='queued'?'Cancel search':'Keep original','secondary',()=>update('cancel')));
+  else root.append(button('Find a better cover','secondary',()=>update('search')));
 }
 
 function openBook(book) {
@@ -651,6 +783,7 @@ function openBook(book) {
   $('book-shelf-location').textContent = book.shelf_label ? 'Current location: '+book.shelf_label : '';
   $('book-available').checked = Boolean(book.available);
 
+  showCoverSearch(book, own && !locked);
   beginBookDetails(book, own && !locked);
   $('book-own-actions').hidden = true;
   $('delete-book').disabled = locked;

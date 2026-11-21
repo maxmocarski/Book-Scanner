@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#283d32">
   <title>BookBridge — your books, connected</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/app.css?v=0.8.4">
-  <script src="/static/app.js?v=0.8.4" defer></script>
+  <link rel="stylesheet" href="/static/app.css?v=0.8.5">
+  <script src="/static/app.js?v=0.8.6" defer></script>
   <script src="/static/catalog.js?v=0.8.4" defer></script>
   <script src="/static/community.js?v=0.8.4" defer></script>
   <script src="/static/public.js?v=0.8.4" defer></script>
@@ -102,7 +102,7 @@
               <button id="camera-close" class="camera-button small" hidden>Close camera</button>
             </div>
             <div id="camera-controls" class="camera-controls" hidden>
-              <p>Keep the whole book in view.</p>
+              <p id="camera-hint">Keep the whole book in view.</p>
               <button id="shutter" class="shutter" aria-label="Capture photo" disabled><span></span></button>
             </div>
           </div>
@@ -140,6 +140,7 @@
         </div>
         <div class="button-row"><label hidden>Queue<select id="queue-library"><option value="">My library</option></select></label><button id="bulk-review" class="secondary">Accept all ready</button></div>
         <p class="small muted">AI can misread books. Review each result for accuracy, or accept all ready results.</p>
+        <div id="queue-selection" class="selection-tools"></div>
         <div id="queue-list" class="queue-list"></div>
       </section>
 
@@ -165,6 +166,7 @@
         </div>
         <p id="library-count" class="muted small"></p>
         <div id="library-progress" class="progress-card" hidden></div>
+        <div id="library-selection" class="selection-tools"></div>
         <div id="book-grid" class="book-grid"></div>
       </section>
 
@@ -321,6 +323,7 @@
       <button class="icon-button" data-close="book-dialog" aria-label="Close book details">×</button>
     </div>
 
+    <div id="book-cover-search"></div>
     <div id="book-photos" class="photo-strip"></div>
     <div class="book-edit-toolbar"><button id="edit-book" type="button" class="secondary">Edit</button><p id="book-save-status" role="status" aria-live="polite">Read-only</p><button id="retry-book-save" type="button" class="text-button" hidden>Retry save</button></div>
 
