@@ -524,6 +524,28 @@ function renderSelection(page, root, items, scope, actions) {
       }
     });
   });
+  let genreButton;
+  if(page==='library' && canCheckGenres()){
+    genreButton=control(buttons,'Find genre',async()=>{
+      const missing=items.filter(item=>ids.has(item.id) && !item.genre);
+      if(!missing.length || selection.findingGenre)return;
+      const epoch=state.epoch;
+      selection.findingGenre=true;
+      updateTray();
+      try{
+        const query=scope.startsWith('lib:')?'?library_id='+encodeURIComponent(scope.slice(4)):'';
+        const result=await api('/genre-checks/selected'+query,{method:'POST',body:missing.map(item=>item.id)});
+        if(epoch===state.epoch && state.owner===scope){
+          toast(result.queued?'Queued '+result.queued+' genre '+(result.queued===1?'check.':'checks.'):'Selected books already classified or queued.');
+          await refreshGenreStatus();
+        }
+      }catch(err){if(epoch===state.epoch)toast(err.message);}
+      finally{
+        selection.findingGenre=false;
+        if(epoch===state.epoch && state.owner===scope && state.tab==='library')renderLibrary();
+      }
+    });
+  }
   let exportButton;
   if(page==='library'){
     exportButton=control(buttons,'Export CSV',async()=>{
@@ -544,6 +566,7 @@ function renderSelection(page, root, items, scope, actions) {
     actions.forEach((action,i)=>{
       actionButtons[i].disabled=selection.busy || !ids.size || Boolean(action.eligible && selected.some(item=>!action.eligible(item)));
     });
+    if(genreButton)genreButton.disabled=selection.busy || selection.findingGenre || !selected.some(item=>!item.genre);
     if(exportButton)exportButton.disabled=selection.busy || !ids.size;
     previews.querySelectorAll('img').forEach(img=>imageObserver.unobserve(img));
     previews.replaceChildren();

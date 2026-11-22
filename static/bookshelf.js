@@ -7,15 +7,17 @@ function bookshelfLocation(copies){
 function renderBookshelf(root,groups,onOpen,decorate){
   applyCatalogView(root);root.classList.toggle('bookshelf-mode',catalogView!=='list');
   prepareShelfZoom(root);
+  const catalogOrder=root.id==='public-results';
   const sections=new Map();
   for(const copies of groups){
-    const book=bookshelfLocation(copies),name=(book.shelf || '').trim(),key=name.toLocaleLowerCase();
+    const book=catalogOrder?copies[0]:bookshelfLocation(copies),name=(book.shelf || '').trim(),key=name.toLocaleLowerCase();
     if(!sections.has(key))sections.set(key,{name,entries:[]});
     sections.get(key).entries.push({book,copies});
   }
-  const ordered=[...sections.values()].sort((a,b)=>a.name&&b.name?a.name.localeCompare(b.name,undefined,{numeric:true}):a.name?-1:b.name?1:0);
+  const ordered=[...sections.values()];
+  if(!catalogOrder)ordered.sort((a,b)=>a.name&&b.name?a.name.localeCompare(b.name,undefined,{numeric:true}):a.name?-1:b.name?1:0);
   for(const section of ordered){
-    section.entries.sort((a,b)=>section.name?(a.book.shelf_position || Number.MAX_SAFE_INTEGER)-(b.book.shelf_position || Number.MAX_SAFE_INTEGER) || (a.book.added_order || 0)-(b.book.added_order || 0):(a.book.added_order || a.book.created || 0)-(b.book.added_order || b.book.created || 0));
+    if(!catalogOrder)section.entries.sort((a,b)=>section.name?(a.book.shelf_position || Number.MAX_SAFE_INTEGER)-(b.book.shelf_position || Number.MAX_SAFE_INTEGER) || (a.book.added_order || 0)-(b.book.added_order || 0):(a.book.added_order || a.book.created || 0)-(b.book.added_order || b.book.created || 0));
     const shelf=e('section','shelf-section');shelf.append(e('h2','shelf-heading',section.name || 'Miscellaneous'));
     if(!section.name)shelf.append(e('p','small muted','No shelf assigned · added in library order'));
     const row=e('div',catalogView==='shelves'?'spine-shelf':catalogView==='cards'?'digital-shelf':'shelf-list');
