@@ -48,6 +48,7 @@ def initialize(db):
         cols = {r['name'] for r in c.execute('PRAGMA table_info(books)')}
         if 'removed' not in cols:
             c.execute('ALTER TABLE books ADD COLUMN removed INTEGER NOT NULL DEFAULT 0')
+        c.execute('CREATE INDEX IF NOT EXISTS books_catalog_order ON books(library_id,title COLLATE NOCASE,author COLLATE NOCASE,id) WHERE removed=0')
         c.execute('INSERT OR IGNORE INTO profiles(user_id) SELECT id FROM users')
 
 
@@ -449,21 +450,40 @@ def install(app, m):
         with db() as c:
             return [dict(r) for r in c.execute('SELECT l.*,COUNT(DISTINCT b.id) AS books FROM libraries l JOIN library_members lm ON lm.library_id=l.id AND lm.user_id=? LEFT JOIN books b ON b.library_id=l.id AND b.removed=0 GROUP BY l.id ORDER BY l.name',(me['id'],))]
 
-    @app.get('/libraries/{library_id}/export.csv')
-    def export_library(library_id: str, me=Depends(user)):
-        with db() as c:
-            library_access(c,library_id,me['id'])
-            rows=c.execute('SELECT title,author,isbn,shelf,shelf_position FROM books WHERE library_id=? AND removed=0 ORDER BY title COLLATE NOCASE,author COLLATE NOCASE,isbn,shelf,id',(library_id,)).fetchall()
+    def export_csv(c, scope, params, filename, selected=None):
+        rows=c.execute('SELECT id,title,author,isbn,shelf,shelf_position FROM books WHERE removed=0 AND '+scope,params)
+        def order(row):
+            shelf=(row['shelf'] or '').strip().casefold()
+            parts=tuple((1,int(part)) if part.isdecimal() else (0,part) for part in re.split(r'(\d+)',shelf))
+            pos=row['shelf_position']
+            return (not shelf, parts, pos is None, pos or 0, (row['title'] or '').casefold(), (row['author'] or '').casefold(), row['id'])
+        books=sorted((row for row in rows if selected is None or row['id'] in selected),key=order)
+        if selected is not None and len(books)!=len(selected):
+            fail(404,'A selected book is no longer available. Refresh your library and try again.')
         output=io.StringIO(newline='')
         writer=csv.writer(output)
-        writer.writerow(['Title','Author','ISBN','Shelf'])
+        writer.writerow(['Title','Author','ISBN','Shelf','Shelf position'])
         def cell(value):
-            text=str(value or '')
-            # Prevent user-entered labels from becoming spreadsheet formulas.
+            text=str(value) if value is not None else ''
             return "'"+text if text.lstrip().startswith(('=','+','-','@')) or text.startswith(('\t','\r','\n')) else text
-        from core.shelves import label
-        for row in rows: writer.writerow([cell(row['title']),cell(row['author']),cell(row['isbn']),cell(label(row['shelf'],row['shelf_position']))])
-        return Response(('\ufeff'+output.getvalue()).encode('utf-8'),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="library-'+library_id+'.csv"','Cache-Control':'no-store'})
+        for row in books:
+            writer.writerow([cell(row[key]) for key in ('title','author','isbn','shelf','shelf_position')])
+        return Response(('\ufeff'+output.getvalue()).encode('utf-8'),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="{filename}.csv"','Cache-Control':'no-store'})
+
+    @app.get('/libraries/{library_id}/export.csv')
+    def export_library(library_id:str,me=Depends(user)):
+        with db() as c:
+            library_access(c,library_id,me['id'])
+            return export_csv(c,'library_id=?',(library_id,),'library-'+library_id)
+
+    @app.post('/books/export.csv')
+    def export_selected(book_ids:list[str],library_id:str | None=None,me=Depends(user)):
+        if not book_ids:fail(422,'Select at least one book.')
+        with db() as c:
+            if library_id:
+                library_access(c,library_id,me['id'])
+                return export_csv(c,'library_id=?',(library_id,),'selected-books',set(book_ids))
+            return export_csv(c,'library_id IS NULL AND owner=?',(me['id'],),'selected-books',set(book_ids))
 
     @app.post('/libraries',status_code=201)
     def create_library(body: LibraryInput, me=Depends(admin)):

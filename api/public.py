@@ -31,16 +31,32 @@ def install(app,m):
             return {'libraries':[dict(r) for r in rows[:100]],'next_offset':offset+100 if len(rows)>100 else None}
 
     @app.get('/public/libraries/{library_id}/books')
-    def catalog(library_id:str,q:str=Query(default='',max_length=100),offset:int=Query(default=0,ge=0)):
+    def catalog(library_id:str, q:str=Query(default='',max_length=100),
+                offset:int=Query(default=0,ge=0), limit:int=Query(default=100,ge=1,le=250)):
         with m.db() as c:
             library=visible(c,library_id)
-            rows=c.execute("SELECT id,title,author,isbn,shelf,shelf_position,added_order FROM books WHERE library_id=? AND removed=0 AND instr(lower(title||' '||author||' '||COALESCE(isbn,'')||' '||shelf),lower(?))>0 ORDER BY title COLLATE NOCASE,author COLLATE NOCASE,id LIMIT 101 OFFSET ?",(library_id,q.strip(),offset)).fetchall()
+            where='WHERE library_id=? AND removed=0'
+            params=[library_id]
+            if q.strip():
+                where+=" AND instr(lower(title||' '||author||' '||COALESCE(isbn,'')||' '||shelf),lower(?))>0"
+                params.append(q.strip())
+            total=c.execute('SELECT COUNT(*) FROM books '+where,params).fetchone()[0]
+            rows=c.execute('SELECT id,title,author,isbn,shelf,shelf_position,added_order FROM books '+where+
+                           ' ORDER BY title COLLATE NOCASE,author COLLATE NOCASE,id LIMIT ? OFFSET ?',
+                           [*params,limit,offset]).fetchall()
             books=[]
-            for row in rows[:100]:
-                book=dict(row);book['edition_key']=edition_key(row);book['shelf_label']=label(row['shelf'],row['shelf_position'])
-                book['images']=[{'view':r['view'],'url':f'/public/libraries/{library_id}/books/{row["id"]}/images/{r["position"]}'} for r in c.execute('SELECT position,view FROM book_images WHERE book_id=? ORDER BY position',(row['id'],))]
+            by_id={}
+            for row in rows:
+                book=dict(row)
+                book.update(edition_key=edition_key(row),shelf_label=label(row['shelf'],row['shelf_position']),images=[])
                 books.append(book)
-            return {'library':library,'books':books,'next_offset':offset+100 if len(rows)>100 else None}
+                by_id[row['id']]=book
+            if by_id:
+                slots=','.join('?' for _ in by_id)
+                for image in c.execute(f'SELECT book_id,position,view FROM book_images WHERE book_id IN ({slots}) ORDER BY book_id,position',list(by_id)):
+                    book_id=image['book_id']
+                    by_id[book_id]['images'].append({'view':image['view'],'url':f'/public/libraries/{library_id}/books/{book_id}/images/{image["position"]}'})
+            return {'library':library,'books':books,'total':total,'next_offset':offset+limit if offset+limit<total else None}
 
     @app.get('/public/libraries/{library_id}/books/{book_id}/images/{position}')
     def image(library_id:str,book_id:str,position:int):
