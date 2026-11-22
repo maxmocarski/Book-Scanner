@@ -95,8 +95,19 @@ def install(app,m):
 
     @app.post('/genre-checks',status_code=202)
     def enqueue(library_id:str | None=None,me=Depends(m.user)):
+        return queue_missing(library_id,me)
+
+    @app.post('/genre-checks/selected',status_code=202)
+    def enqueue_selected(book_ids:list[str],library_id:str | None=None,me=Depends(m.user)):
+        if not book_ids:m.fail(422,'Select at least one book.')
+        return queue_missing(library_id,me,book_ids)
+
+    def queue_missing(library_id,me,book_ids=None):
         with m.db() as c:
             where,args,_=scope(c,me,library_id,manage=True)
+            if book_ids is not None:
+                where+=' AND b.id IN (SELECT value FROM json_each(?))'
+                args=(*args,json.dumps(book_ids))
             rows=c.execute('SELECT b.* FROM books b WHERE '+where+" AND b.removed=0 AND b.genre='' AND NOT EXISTS(SELECT 1 FROM genre_jobs j WHERE j.book_id=b.id AND j.status IN ('queued','checking'))",args).fetchall()
             for book in rows:
                 c.execute("INSERT INTO genre_jobs(book_id,requester,snapshot,status,error,created) VALUES(?,?,?,'queued',NULL,?) ON CONFLICT(book_id) DO UPDATE SET requester=excluded.requester,snapshot=excluded.snapshot,status='queued',error=NULL,created=excluded.created",(book['id'],me['id'],json.dumps(snapshot(book)),time.time()))
