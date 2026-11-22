@@ -1,10 +1,24 @@
 """Anonymous, read-only access to explicitly public shared-library catalogs."""
+import re
+from functools import lru_cache
 from fastapi import Depends, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 from api import community
 from api.mobile import edition_key
 from core.shelves import label
+
+
+@lru_cache(maxsize=1024)
+def shelf_order(name):
+    name=name.strip().casefold()
+    parts=re.split(r'(\d+)',name)
+    return tuple(int(part) if i % 2 else part for i,part in enumerate(parts)),name
+
+
+def compare_shelves(left,right):
+    a,b=shelf_order(left),shelf_order(right)
+    return (a>b)-(a<b)
 
 
 class Visibility(BaseModel):
@@ -41,8 +55,12 @@ def install(app,m):
                 where+=" AND instr(lower(title||' '||author||' '||COALESCE(isbn,'')||' '||shelf),lower(?))>0"
                 params.append(q.strip())
             total=c.execute('SELECT COUNT(*) FROM books '+where,params).fetchone()[0]
+            c.create_collation('SHELF_ORDER',compare_shelves)
             rows=c.execute('SELECT id,title,author,isbn,shelf,shelf_position,added_order FROM books '+where+
-                           ' ORDER BY title COLLATE NOCASE,author COLLATE NOCASE,id LIMIT ? OFFSET ?',
+                           """ ORDER BY trim(shelf)='', shelf COLLATE SHELF_ORDER,
+                               CASE WHEN trim(shelf)<>'' THEN shelf_position IS NULL END,
+                               CASE WHEN trim(shelf)<>'' THEN shelf_position END,
+                               added_order,title COLLATE NOCASE,author COLLATE NOCASE,id LIMIT ? OFFSET ?""",
                            [*params,limit,offset]).fetchall()
             books=[]
             by_id={}
