@@ -441,9 +441,9 @@ async function capturePhoto() {
   if (blob) await setPhoto(new File([blob], 'capture.jpg', { type: 'image/jpeg' }), view, photos);
 }
 
-// Selection mode lists individual copies, even when the catalog groups editions.
+// Selection uses the same rows and groups as browsing.
 const selections = {};
-function renderSelection(page, root, items, scope, actions, describe) {
+function renderSelection(page, root, items, scope, actions) {
   const bar = $(page + '-selection');
   bar.querySelectorAll('img').forEach(img=>imageObserver.unobserve(img));
   bar.replaceChildren();
@@ -455,7 +455,13 @@ function renderSelection(page, root, items, scope, actions, describe) {
   const visible = new Set(items.map(item => item.id));
   for (const id of ids) if (!visible.has(id)) ids.delete(id);
   if (!items.length) { selection.active = false; return false; }
-  const redraw = page === 'queue' ? renderQueue : renderLibrary;
+  function redraw(){
+    const x=window.scrollX,y=window.scrollY;
+    const shelves=[...root.querySelectorAll('.digital-shelf,.spine-shelf,.shelf-list')].map(row=>row.scrollLeft);
+    if(page==='queue')renderQueue();else renderLibrary();
+    root.querySelectorAll('.digital-shelf,.spine-shelf,.shelf-list').forEach((row,i)=>row.scrollLeft=shelves[i] || 0);
+    window.scrollTo({left:x,top:y,behavior:'instant'});
+  }
   function control(parent,label,callback) {
     const el=button(label,'secondary',callback);
     el.disabled=selection.busy;
@@ -479,10 +485,10 @@ function renderSelection(page, root, items, scope, actions, describe) {
   bar.append(tray);
   const selectAll=control(bar,'Select all',()=>{
     const all=ids.size===items.length;
-    for(const [id,check] of checks){
-      check.checked=!all;
+    for(const id of visible){
       if(all)ids.delete(id);else ids.add(id);
     }
+    for(const paint of checks.values())paint();
     updateTray();
   });
   function photo(item){
@@ -548,31 +554,63 @@ function renderSelection(page, root, items, scope, actions, describe) {
       previews.append(thumb);
     }
   }
-  const list=e('div','selection-grid');
-  for(const item of items){
-    const tile=e('label','selection-tile');
-    const check=e('input');
-    check.type='checkbox';
-    check.checked=ids.has(item.id);
-    check.disabled=selection.busy;
-    checks.set(item.id,check);
-    check.addEventListener('change',()=>{
-      if(check.checked)ids.add(item.id);else ids.delete(item.id);
-      updateTray();
-    });
-    const name=item.title || item.metadata?.title || 'Untitled scan';
-    const caption=describe(item);
-    tile.title=caption;
-    check.setAttribute('aria-label',caption);
-    const art=e('span','selection-cover',name);
-    const cover=photo(item);
-    if(cover)art.append(image(cover.url,'',''));
-    tile.append(art,e('span','selection-caption',caption),check);
-    list.append(tile);
-  }
   updateTray();
-  root.append(list);
-  return true;
+  return function decorate(node,copies){
+    const eligible=copies.filter(copy=>visible.has(copy.id));
+    node.classList.add('selectable-item');
+    const marker=e('span','selection-mark');
+    marker.setAttribute('aria-hidden','true');
+    node.append(marker);
+    const disabled=selection.busy || !eligible.length;
+    if(node.tagName==='BUTTON')node.disabled=disabled;
+    else {
+      node.tabIndex=disabled?-1:0;
+      node.setAttribute('role','button');
+      node.setAttribute('aria-label',copies[0].metadata.title || 'Book scan');
+      node.querySelectorAll('.queue-actions button').forEach(b=>b.disabled=true);
+      node.addEventListener('keydown',event=>{
+        if(event.key==='Enter' || event.key===' '){event.preventDefault();node.click();}
+      });
+    }
+    node.setAttribute('aria-disabled',String(disabled));
+    function paint(){
+      const n=eligible.filter(copy=>ids.has(copy.id)).length;
+      const value=n===0?'false':n===eligible.length?'true':'mixed';
+      node.setAttribute('aria-pressed',value);
+      marker.textContent=value==='true'?'✓':value==='mixed'?'−':'';
+    }
+    checks.set(node,paint);
+    paint();
+    function toggle(id){
+      if(ids.has(id))ids.delete(id);else ids.add(id);
+      paint();
+      updateTray();
+    }
+    node.addEventListener('click',event=>{
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if(disabled)return;
+      if(copies.length===1){toggle(copies[0].id);return;}
+      const dialog=$('copies-dialog');
+      $('copies-title').textContent=copies[0].title;
+      $('copies-author').textContent=copies[0].author;
+      $('copies-count').textContent='Select individual copies';
+      $('copies-photos').replaceChildren();
+      const list=$('copies-list');
+      list.replaceChildren();
+      copies.forEach((book,i)=>{
+        const row=e('label','copy-choice');
+        const input=e('input');
+        input.type='checkbox';
+        input.checked=ids.has(book.id);
+        input.disabled=!visible.has(book.id);
+        input.addEventListener('change',()=>toggle(book.id));
+        row.append(input,e('span','','Copy '+(i+1)+' · '+(book.shelf_label || book.shelf || 'Miscellaneous')+(input.disabled?' · Unavailable':'')));
+        list.append(row);
+      });
+      dialog.showModal();
+    },true);
+  };
 }
 
 const reviewActions = [
@@ -595,8 +633,7 @@ function renderQueue() {
   root.replaceChildren();
 
   const queueScans = state.scans.filter(s => (s.library_id || '') === $('queue-library').value);
-  if (renderSelection('queue',root,queueScans,$('queue-library').value,reviewActions,s =>
-    [s.metadata.title || 'Untitled scan',s.metadata.author,s.metadata.isbn,s.status,s.duplicate && 'Possible duplicate',...(s.warnings || [])].filter(Boolean).join(' · '))) return;
+  const decorate=renderSelection('queue',root,queueScans,$('queue-library').value,reviewActions);
   if (!queueScans.length) {
     empty(root, 'A clear queue.', 'Photograph a book to get started.', button('Scan a book', 'primary', () => navigate('scan')));
     return;
@@ -655,6 +692,7 @@ function renderQueue() {
     }));
 
     row.append(actions);
+    if(decorate)decorate(row,[scan]);
     root.append(row);
   }
 }
@@ -782,8 +820,7 @@ function renderLibrary() {
 
   const editable = state.libraryLoading || friend ? [] : books.filter(b =>
     (b.owner === state.me.id || shared?.owner === state.me.id) && !reserved(b.id));
-  if (renderSelection('library',grid,editable,state.owner,libraryActions,b =>
-    [b.title,b.author,b.shelf_label || b.shelf || 'Miscellaneous',b.isbn].filter(Boolean).join(' · '))) return;
+  const decorate=renderSelection('library',grid,editable,state.owner,libraryActions);
   if (state.libraryLoading) { grid.append(e('p','muted','Loading this library…')); return; }
   if (!books.length) {
     empty(grid, state.books.length ? 'No matches yet.' : friend ? 'An empty shelf.' : 'Scan your library', state.books.length ? 'Try another title or author.' : friend ? 'Your friend hasn’t added any books yet.' : 'Start with one cover or a few book spines. Review the results, then find every saved book here.', !friend && !state.books.length ? button('Scan your first books', 'primary', () => { $('scan-library').value = shared?.id || ''; navigate('scan'); }) : null);
@@ -793,7 +830,7 @@ function renderLibrary() {
 
   const groups = groupCopies(books);
   $('library-count').textContent = groups.length + (groups.length===1?' title':' titles');
-  renderBookshelf(grid,groups,copies=>copies.length>1?openCopies(copies):openBook(copies[0]));
+  renderBookshelf(grid,groups,copies=>copies.length>1?openCopies(copies):openBook(copies[0]),decorate);
 }
 
 let coverTimer;

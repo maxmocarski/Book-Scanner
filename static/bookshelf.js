@@ -4,7 +4,7 @@ function bookshelfLocation(copies){
   const named=copies.filter(b=>b.shelf?.trim()).sort((a,b)=>a.shelf.localeCompare(b.shelf,undefined,{numeric:true,sensitivity:'base'}) || (a.shelf_position || 0)-(b.shelf_position || 0));
   return named[0] || [...copies].sort((a,b)=>(a.added_order || a.created || 0)-(b.added_order || b.created || 0))[0];
 }
-function renderBookshelf(root,groups,onOpen){
+function renderBookshelf(root,groups,onOpen,decorate){
   applyCatalogView(root);root.classList.toggle('bookshelf-mode',catalogView!=='list');
   prepareShelfZoom(root);
   const sections=new Map();
@@ -29,12 +29,15 @@ function renderBookshelf(root,groups,onOpen){
         spine.append(e('span','spine-title',book.title));
         spine.title=book.title+' — '+book.author;
         spine.setAttribute('aria-label',book.title+' by '+book.author);
+        if(decorate)decorate(spine,copies);
         row.append(spine);continue;
       }
-      row.append(makeBookCard([book,...copies.filter(b=>b.id!==book.id)],()=>onOpen(copies), item => {
+      const card=makeBookCard([book,...copies.filter(b=>b.id!==book.id)],()=>onOpen(copies), item => {
         const photo = item.images.find(p=>p.view==='front') || item.images[0];
         return photo ? (root.id==='public-results' ? publicPhoto(photo,'') : image(photo.url,'',item.title+' cover')) : null;
-      }));
+      });
+      if(decorate)decorate(card,copies);
+      row.append(card);
     }
     shelf.append(row);root.append(shelf);
   }
