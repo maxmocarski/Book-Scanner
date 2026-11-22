@@ -445,6 +445,7 @@ async function capturePhoto() {
 const selections = {};
 function renderSelection(page, root, items, scope, actions, describe) {
   const bar = $(page + '-selection');
+  bar.querySelectorAll('img').forEach(img=>imageObserver.unobserve(img));
   bar.replaceChildren();
   let selection = selections[page];
   if (selection?.scope !== scope) {
@@ -455,27 +456,43 @@ function renderSelection(page, root, items, scope, actions, describe) {
   for (const id of ids) if (!visible.has(id)) ids.delete(id);
   if (!items.length) { selection.active = false; return false; }
   const redraw = page === 'queue' ? renderQueue : renderLibrary;
-  function control(label, callback, disabled=false) {
-    const el = button(label, 'secondary', callback);
-    el.disabled = selection.busy || disabled;
-    bar.append(el);
+  function control(parent,label,callback) {
+    const el=button(label,'secondary',callback);
+    el.disabled=selection.busy;
+    parent.append(el);
+    return el;
   }
-  control(selection.active ? 'Done' : 'Select', () => {
-    selection.active = !selection.active;
-    ids.clear();
-    redraw();
+  if (!selection.active){
+    control(bar,'Select',()=>{selection.active=true;redraw();});
+    return false;
+  }
+  const checks=new Map();
+  const byId=new Map(items.map(item=>[item.id,item]));
+  const tray=e('section','selection-tray');
+  tray.setAttribute('aria-label','Selection actions');
+  const previews=e('div','selection-previews');
+  previews.setAttribute('aria-hidden','true');
+  const count=e('strong','selection-count');
+  count.setAttribute('role','status');
+  const buttons=e('div','selection-actions');
+  tray.append(previews,count);
+  bar.append(tray);
+  const selectAll=control(bar,'Select all',()=>{
+    const all=ids.size===items.length;
+    for(const [id,check] of checks){
+      check.checked=!all;
+      if(all)ids.delete(id);else ids.add(id);
+    }
+    updateTray();
   });
-  if (!selection.active) return false;
-  const selected = items.filter(item => ids.has(item.id));
-  const all = ids.size === items.length;
-  control(all ? 'Clear selection' : 'Select all', () => {
-    if (all) ids.clear();
-    else items.forEach(item => ids.add(item.id));
-    redraw();
-  });
-  bar.append(e('span','small',ids.size + ' selected'));
-  for (const action of actions) {
-    control(action.label, async () => {
+  function photo(item){
+    return item.images.find(p=>p.view==='front') || item.images[0];
+  }
+  control(tray,'Cancel',()=>{selection.active=false;ids.clear();redraw();});
+  tray.append(buttons);
+  const actionButtons=actions.map(action=>{
+    return control(buttons,action.label,async()=>{
+      const selected=items.filter(item=>ids.has(item.id));
       if (selection.busy || !selected.length) return;
       const value = action.prepare(selected.length);
       if (value === null || value === false) return;
@@ -499,23 +516,61 @@ function renderSelection(page, root, items, scope, actions, describe) {
         selection.busy = false;
         if (state.epoch === epoch) redraw();
       }
-    }, !selected.length || selected.some(item => action.eligible && !action.eligible(item)));
-  }
-  const list = e('div','selection-list');
-  for (const item of items) {
-    const row = e('label','selection-row');
-    const check = e('input');
-    check.type = 'checkbox';
-    check.checked = ids.has(item.id);
-    check.disabled = selection.busy;
-    check.addEventListener('change', () => {
-      if (check.checked) ids.add(item.id); else ids.delete(item.id);
-      redraw();
-      root.querySelectorAll('input')[items.indexOf(item)]?.focus();
     });
-    row.append(check, e('span','',describe(item)));
-    list.append(row);
+  });
+  let exportButton;
+  if(page==='library'){
+    exportButton=control(buttons,'Export CSV',async()=>{
+      const library=scope.startsWith('lib:')?'?library_id='+encodeURIComponent(scope.slice(4)):'';
+      const epoch=state.epoch;
+      exportButton.disabled=true;
+      try{
+        const blob=await api('/books/export.csv'+library,{method:'POST',body:[...ids],responseType:'blob'});
+        if(epoch===state.epoch)downloadBookCsv(blob,'selected');
+      }catch(err){if(epoch===state.epoch)toast(err.message);}
+      finally{exportButton.disabled=selection.busy || !ids.size;}
+    });
   }
+  function updateTray(){
+    const selected=Array.from(ids,id=>byId.get(id));
+    count.textContent=ids.size+' selected';
+    selectAll.textContent=ids.size===items.length?'Clear selection':'Select all';
+    actions.forEach((action,i)=>{
+      actionButtons[i].disabled=selection.busy || !ids.size || Boolean(action.eligible && selected.some(item=>!action.eligible(item)));
+    });
+    if(exportButton)exportButton.disabled=selection.busy || !ids.size;
+    previews.querySelectorAll('img').forEach(img=>imageObserver.unobserve(img));
+    previews.replaceChildren();
+    for(const item of selected.slice(-5)){
+      const cover=photo(item);
+      const thumb=e('span','selection-thumb',(item.title || item.metadata?.title || 'Book').slice(0,1));
+      if(cover)thumb.append(image(cover.url,'',''));
+      previews.append(thumb);
+    }
+  }
+  const list=e('div','selection-grid');
+  for(const item of items){
+    const tile=e('label','selection-tile');
+    const check=e('input');
+    check.type='checkbox';
+    check.checked=ids.has(item.id);
+    check.disabled=selection.busy;
+    checks.set(item.id,check);
+    check.addEventListener('change',()=>{
+      if(check.checked)ids.add(item.id);else ids.delete(item.id);
+      updateTray();
+    });
+    const name=item.title || item.metadata?.title || 'Untitled scan';
+    const caption=describe(item);
+    tile.title=caption;
+    check.setAttribute('aria-label',caption);
+    const art=e('span','selection-cover',name);
+    const cover=photo(item);
+    if(cover)art.append(image(cover.url,'',''));
+    tile.append(art,e('span','selection-caption',caption),check);
+    list.append(tile);
+  }
+  updateTray();
   root.append(list);
   return true;
 }
@@ -536,6 +591,7 @@ const libraryActions = [
 
 function renderQueue() {
   const root = $('queue-list');
+  root.querySelectorAll('img[data-photo]').forEach(img=>imageObserver.unobserve(img));
   root.replaceChildren();
 
   const queueScans = state.scans.filter(s => (s.library_id || '') === $('queue-library').value);
@@ -720,6 +776,7 @@ function renderLibrary() {
   $('library-count').textContent = books.length + ' ' + (books.length === 1 ? 'book' : 'books') + (query ? ' found' : ' on the shelf');
 
   const grid = $('book-grid');
+  grid.querySelectorAll('img[data-photo]').forEach(img=>imageObserver.unobserve(img));
   grid.replaceChildren();
   applyCatalogView(grid);
 
@@ -739,20 +796,31 @@ function renderLibrary() {
   renderBookshelf(grid,groups,copies=>copies.length>1?openCopies(copies):openBook(copies[0]));
 }
 
+let coverTimer;
+let coverGeneration = 0;
+$('book-dialog').addEventListener('close', () => {
+  clearTimeout(coverTimer);
+  coverGeneration++;
+});
 function showCoverSearch(book, allowed) {
+  clearTimeout(coverTimer);
+  const generation = ++coverGeneration;
   const root = $('book-cover-search');
   root.replaceChildren();
   if (!allowed) return;
   const status = book.cover_status;
-  const messages = {queued:'Searching for a matching cover…', missing:'No matching cover found.',
+  const messages = {queued:'Searching… You can close this book. Results appear here automatically within two minutes.', timeout:'Search timed out. You can try again.', missing:'No matching cover found.',
     failed:'Cover search unavailable. You can retry.', suggested:'Suggested cover', applied:'Online cover in use.'};
   root.append(e('p','small muted',messages[status] || 'Optional cover search shares the title, author and ISBN online. Your photos stay local.'));
   async function update(action) {
+    if (action) clearTimeout(coverTimer);
+    const requestGeneration = action ? ++coverGeneration : generation;
     const result = action ? await api('/books/'+book.id+'/cover/'+action,{method:'POST'}) :
-      (await api('/books'+(book.library_id?'?library_id='+encodeURIComponent(book.library_id):''))).find(b=>b.id===book.id);
-    if (!result || state.book?.id!==book.id || !$('book-dialog').open) return;
+      await api('/books/'+book.id+'/cover-status');
+    if (requestGeneration !== coverGeneration || !result || state.book?.id!==book.id || !$('book-dialog').open) return;
     state.book=result;
     showCoverSearch(result,allowed);
+    if (!action && result.cover_status===status) return;
     photoStrip($('book-photos'),result.images);
     await refreshAll();
   }
@@ -760,7 +828,19 @@ function showCoverSearch(book, allowed) {
     root.append(image('/books/'+book.id+'/suggested-cover?v='+book.cover_token,'queue-cover','Suggested cover'));
     root.append(button('Use this cover','secondary',()=>update('apply')));
   }
-  if (status==='queued') root.append(button('Check result','secondary',()=>update(null)));
+  if (status==='queued') {
+    const poll = async () => {
+      if (generation !== coverGeneration || !$('book-dialog').open) return;
+      try { await update(null); }
+      catch {
+        if (generation === coverGeneration && $('book-dialog').open) {
+          root.firstChild.textContent = 'Waiting to reconnect for the cover result…';
+          coverTimer = setTimeout(poll,5000);
+        }
+      }
+    };
+    coverTimer = setTimeout(poll,3000);
+  }
   if (['queued','suggested','applied'].includes(status))
     root.append(button(status==='applied'?'Restore original photo':status==='queued'?'Cancel search':'Keep original','secondary',()=>update('cancel')));
   else root.append(button('Find a better cover','secondary',()=>update('search')));
@@ -1074,7 +1154,7 @@ $('accept-invite-form').addEventListener('submit', event => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) stopCamera();
-  else if (state.tab==='public') refreshPublic().catch(err=>publicError(err));
+  else if (state.tab==='public') refreshPublic(false,publicCatalog.selected ? publicCatalog.offset : null).catch(publicError);
   else if (state.me && !['settings','admin'].includes(state.tab)) refreshAll().catch(() => {});
 });
 

@@ -270,10 +270,13 @@ $('admin-book-search').addEventListener('submit',event=>{
 
 async function exportLibrary(library) {
   const blob = await api('/libraries/'+encodeURIComponent(library.id)+'/export.csv',{responseType:'blob'});
+  downloadBookCsv(blob,library.name);
+}
+function downloadBookCsv(blob,name) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = (library.name.replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-+|-+$/g,'') || 'shared-library')+'-books.csv';
+  link.download = (name.replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-+|-+$/g,'') || 'shared-library')+'-books.csv';
   document.body.append(link);
   link.click();
   link.remove();

@@ -7,7 +7,7 @@
   <title>BookBridge — your books, connected</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css?v=0.8.5">
-  <script src="/static/app.js?v=0.8.6" defer></script>
+  <script src="/static/app.js?v=0.8.7" defer></script>
   <script src="/static/catalog.js?v=0.8.4" defer></script>
   <script src="/static/community.js?v=0.8.4" defer></script>
   <script src="/static/public.js?v=0.8.4" defer></script>
@@ -279,7 +279,12 @@
       <form id="public-search-form" class="button-row"><label class="sr-only" for="public-search">Search libraries or books</label><input id="public-search" type="search" maxlength="100" placeholder="Search public libraries"><button class="secondary">Search</button></form>
       <div class="catalog-view-controls" role="group" aria-label="Catalog view"><button type="button" data-catalog-view="cards" aria-pressed="true">Covers</button><button type="button" data-catalog-view="shelves" aria-pressed="false">Shelves</button><button type="button" data-catalog-view="list" aria-pressed="false">List</button></div>
       <div class="shelf-zoom-controls" hidden><span>Shelf zoom</span><button type="button" data-shelf-zoom="out" aria-label="Zoom shelves out">−</button><output class="shelf-zoom-value" aria-live="polite">100%</output><button type="button" data-shelf-zoom="in" aria-label="Zoom shelves in">+</button><button type="button" data-shelf-zoom="reset">Reset</button></div></details>
-      <p id="public-status" class="muted" role="status"></p><div id="public-results" class="book-grid"></div><button id="public-more" class="secondary" hidden>Load more</button>
+      <p id="public-status" class="muted" role="status"></p><form id="public-pages" class="button-row" hidden>
+        <button type="button" id="public-prev" class="secondary">Previous</button>
+        <label>Page <input type="number" id="public-page" min="1" required style="width:6em"></label>
+        <span id="public-page-count"></span><button class="secondary">Go</button>
+        <button type="button" id="public-next" class="secondary">Next</button>
+      </form><div id="public-results" class="book-grid"></div><button id="public-more" class="secondary" hidden>Load more</button>
     </section>
   </main>
 
