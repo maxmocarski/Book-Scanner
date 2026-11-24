@@ -1,167 +1,134 @@
 # BookBridge
 
-Photograph physical books, build a private library, and arrange swaps with friends. Inspired by ReVolt (https://github.com/maxmocarski/Revolt), with a separate app, database, and web interface.
+BookBridge is a self-hosted app for cataloging physical books. Photograph a single book or a shelf, review the results, and organize your collection from a phone or desktop.
 
-BookBridge runs a FastAPI backend and a simple HTML/CSS/JavaScript frontend. Book recognition uses Gemma through your own Ollama server; SearXNG lookup is optional.
+BookBridge runs on FastAPI, SQLite, and a plain HTML, CSS, and JavaScript frontend. It uses Ollama for local book recognition and can use SearXNG for metadata and cover searches.
 
+## What you can do
 
-WHAT IT DOES
-================================================================================
+- Scan a book using cover, spine, or back photos, or scan multiple books from a shelf photo. The scan queue persists across restarts.
+- Review and edit titles, authors, ISBNs, and genres before saving. ISBNs are optional. Check any lookup suggestions against your copy.
+- Browse your collection as covers, shelves, or a list. Organize books by genre or shelf and export selected books or a shared library to CSV.
+- Request a cover search in the background, then review the suggested image. BookBridge keeps the original scan.
+- Share libraries with invited members, opt in to a public catalog, or arrange book swaps with friends. Ownership transfers after both people confirm the exchange.
 
-- Scan one book with up to three photos: front, spine, and back.
-- Queue books while another scans; the queue survives restarts.
-- Review title, author, ISBN, and text corrections before saving.
-- Search/edit your library and choose which books are available to trade.
-- Invite friends, browse their libraries, and request book-for-book swaps.
-- Transfer ownership and photos after both people confirm the physical exchange.
+## Run locally
 
+Use Python 3.12 on Linux or WSL. Start Ollama and download the default vision and text models:
 
-QUICK START & RUNNING LOCALLY
-================================================================================
+```bash
+ollama pull gemma3:12b
+ollama pull gemma3:1b
+```
 
-Use Linux/WSL and Python 3.12. Install Ollama separately and download the models:
+```bash
+git clone https://github.com/maxmocarski/Book-Scanner.git
+cd Book-Scanner
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8503
+```
 
-  ollama pull gemma3:12b
-  ollama pull gemma3:1b
+Open [BookBridge](http://localhost:8503/) to create an account and scan a book. The [API docs](http://localhost:8503/docs) are also available. Run one BookBridge process per data directory so a single worker owns the scan queue.
 
-  git clone https://github.com/maxmocarski/Book-Scanner.git
-  cd Book-Scanner
-  python3 -m venv .venv
-  .venv/bin/pip install -r requirements.txt
-  OLLAMA_HOST=http://127.0.0.1:11434 .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8503
+Phone camera capture requires HTTPS. Serve BookBridge through a private HTTPS proxy, such as Tailscale Serve, or upload existing photos from your device.
 
-Open http://localhost:8503/ for the app; /docs provides developer API controls. Sign up, scan, review, and save. Use one worker: the queue and migration lock prevent multiple processes sharing the same data directory.
+## Run with Docker Compose
 
-The primary model must support images. The default gemma3:1b second pass only handles text. A cold model or CPU inference can take longer; models are unloaded after each pass by default to reduce memory pressure.
+The included [compose.yaml](compose.yaml) starts BookBridge. Use an existing Docker network with Ollama reachable as `ollama:11434`. For search features, SearXNG must be reachable as `searxng:8080`. If your containers use other hostnames, set the corresponding URLs in the Compose service.
 
-DOCKER DEPLOYMENT
-================================================================================
+Set the network in a `.env` file beside `compose.yaml`. The default is `revolt_default`.
 
-The supplied Compose file expects existing ollama and optionally searxng containers on a shared Docker network. It does NOT create those services.
+```dotenv
+BOOKBRIDGE_NETWORK=revolt_default
+```
 
-  cp .env.example .env
-  # Edit BOOKBRIDGE_NETWORK to your existing Docker network name.
-  docker compose up -d --build
+```bash
+docker compose up -d --build
+docker compose logs --tail=50 bookbridge
+```
 
-The example defaults to revolt_default. Ollama must be reachable as http://ollama:11434 on that network; adjust OLLAMA_HOST in Compose if its service name differs. BookBridge listens on localhost port 8503 and stores its data in a named volume.
+The app binds to `127.0.0.1:8503` on the Docker host. Compose mounts the `bookbridge-data` volume at `/data`.
 
-For an existing installation managed by another stack, keep that stack's Compose service and data mount. Update only this app's code and rebuild its service; don't switch data volumes accidentally.
+### Update an existing installation
 
---- Existing guzdekai Installation ---
+Stop BookBridge and back up its entire data directory before upgrading. Rebuild from the active Compose project using the same volume or bind mount. This also applies to installations where BookBridge runs inside another stack.
 
-BookBridge's source is ~/bookbridge; the active Compose file is ~/revolt/docker-compose.yml with build: ../bookbridge and ../bookbridge/data:/data.
+Run these commands from the directory of the active Compose file. Update the BookBridge source between the backup and the rebuild.
 
-  cd ~/bookbridge
-  git pull
-  cd ~/revolt
-  sudo docker compose up -d --build --no-deps bookbridge
+```bash
+docker compose stop bookbridge
+docker compose cp bookbridge:/data ./bookbridge-data-backup
+```
 
-This rebuilds BookBridge separately from ReVolt. The repository cleanup does not change the database schema, API paths, container port, or mounted data.
+```bash
+docker compose up -d --build --no-deps bookbridge
+```
 
+BookBridge migrates older v0.1 databases on startup. Restore the pre-upgrade backup before running v0.1 again.
 
-TECHNICAL REFERENCE
-================================================================================
+## Configuration
 
---- Corrections and ISBNs ---
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OLLAMA_HOST` | `http://localhost:11434` locally, `http://ollama:11434` in Compose | Ollama URL |
+| `BOOKBRIDGE_MODEL` | `gemma3:12b` | Vision model for book scans |
+| `BOOKBRIDGE_TEXT_MODEL` | `gemma3:1b` | Text model for OCR cleanup and enrichment |
+| `BOOKBRIDGE_COVER_MODEL` | Uses `BOOKBRIDGE_MODEL` when unset | Vision model for evaluating cover candidates |
+| `BOOKBRIDGE_ENRICHMENT` | `cleanup` | Set to `lookup` to add metadata search or `off` to skip the second pass |
+| `SEARXNG_URL` | `http://searxng:8080` | Search URL for metadata lookup and cover search |
+| `BOOKBRIDGE_KEEP_ALIVE` | `0` | Unload models after inference. Use a duration such as `5m` to keep them loaded longer |
+| `BOOKBRIDGE_MODEL_TIMEOUT` | `180` | Timeout in seconds for model requests |
+| `BOOKBRIDGE_MAX_PENDING_PER_USER` | `100` | Maximum pending scans per user |
+| `BOOKBRIDGE_MAX_PENDING` | `500` | Maximum pending scans overall |
+| `BOOKBRIDGE_DATA` | `./data` locally, `/data` in Docker | Directory for persistent SQLite data |
 
-The result includes metadata, original_metadata, a corrections list with before/after values, warnings, source URLs/snippets, and an optional lookup_suggestion.
+Compose reads the network, model, enrichment, and keep-alive settings from `.env`. To change an app variable that Compose does not pass through, set it in the service's `environment` block.
 
-- ISBNs read with common OCR mistakes such as O for 0, or I/l/| for 1, can be repaired ONLY WHEN the resulting number passes ISBN-10/ISBN-13 validation. No digit padding or invented check digits.
-- The lighter model can make small title/author edits, such as "F. Sc0tt Fitzgerald" -> "F. Scott Fitzgerald". Large rewrites are rejected. Names and deliberate title spelling may still be miscorrected; the original and applied edits remain visible.
-- A secondary-model ISBN cannot replace a valid photographed ISBN. Missing/invalid photographed ISBNs stay null unless deterministic character repair succeeds.
-- Lookup metadata stays in a SEPARATE SUGGESTION. Suggested fields must occur in cited snippets, and suggested ISBNs must pass checksum validation. Snippets can still describe the wrong book or edition; suggestions are explicitly unverified. Choose/correct fields yourself in the save request.
-- ISBN checksum validation proves syntax, not book identity or edition. ISBNs are optional at save time. Title and author require user input if unreadable.
+For search, enable JSON responses in your SearXNG `settings.yml` and restart SearXNG:
 
-Note: This is OCR cleanup, not a guarantee of bibliographic accuracy. No barcode decoder or dedicated catalog API is included yet.
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
 
---- Configuration Variables ---
+## Data and privacy
 
-Variable                       Default                           Meaning
-----------------------------------------------------------------------------------------------------
-OLLAMA_HOST                    http://localhost:11434 (locally)  Ollama URL
-                               http://ollama:11434 (in Compose)
-BOOKBRIDGE_MODEL               gemma3:12b                        Primary vision model
-BOOKBRIDGE_TEXT_MODEL          gemma3:1b                         Lighter text-only second pass
-BOOKBRIDGE_ENRICHMENT          cleanup                           Default cleanup, lookup, or off
-SEARXNG_URL                    http://searxng:8080               Search endpoint for lookup mode
-BOOKBRIDGE_KEEP_ALIVE          0                                 Unload each model after inference;
-                                                                 use 5m if both fit comfortably
-BOOKBRIDGE_MODEL_TIMEOUT       180                               Timeout in seconds per model pass
-BOOKBRIDGE_MAX_PENDING_PER_USER 100                              Max queued/processing jobs/user
-BOOKBRIDGE_MAX_PENDING         500                               Max queued/processing jobs overall
-BOOKBRIDGE_DATA                ./data (locally)                  Persistent SQLite data directory
-                               /data (in Docker)
+- Shared libraries start private unless you choose to make them public. Anyone who can reach the app can browse public catalogs and see their book photos without signing in.
+- Book recognition sends scan photos to your configured Ollama server. Search sends book metadata such as title, author, or ISBN through SearXNG.
+- Friend invite codes are single-use and expire after 24 hours. Unsaved scan results and their photos expire 24 hours after processing finishes.
+- BookBridge validates ISBN checksums and preserves original OCR text for review. A valid checksum only checks the number's format. Verify the title, author, and edition before saving.
 
-Compose directly exposes the model/mode/keep-alive variables. Add the others to its environment: block if changing them. Timeout excludes waiting in the queue. Default unloading reduces pressure when both models cannot fit in memory but adds reload latency for each book. No Ollama model weights are bundled.
+## Development
 
---- Search Integration (SearXNG) ---
+| Path | Purpose |
+| --- | --- |
+| [api/](api/) | FastAPI routes, accounts, libraries, and SQLite schema |
+| [core/](core/) | Scan queue, OCR, metadata, genres, and cover search |
+| [static/](static/) | Web interface |
+| [tests/](tests/) | Backend tests and browser checks |
 
-Lookup mode requires JSON results enabled in the existing SearXNG settings.yml:
+Run the backend tests:
 
-  search:
-    formats:
-      - html
-      - json
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q
+```
 
-Merge this into existing settings and restart SearXNG. Lookup failures fall back to text cleanup. Search suggestions are unverified and may describe another edition.
+For browser checks, start the disposable mock server in one terminal:
 
+```bash
+.venv/bin/python tests/ui/mock_server.py
+```
 
-EXISTING DATA & MIGRATION
-================================================================================
+In another terminal, install Playwright and run the checks:
 
-On startup, 0.1 data is migrated in one transaction: saved books become one-front-photo records, unexpired old drafts become ready scan results, and accounts/friends/trades stay intact. Migration is idempotent. The old image column/drafts table are removed after copying, so DO NOT run the old application against the migrated database.
+```bash
+npm install --no-save playwright
+npx playwright install chromium
+node tests/ui/run.cjs
+```
 
-Before upgrading an already deployed 0.1 instance, stop it and copy its data out:
-
-  sudo docker compose stop bookbridge
-  sudo docker cp bookbridge:/data ./bookbridge-data-backup-before-v02
-
-Keep the backup outside your Git repository. Update code, then rebuild/start using the same Compose project/data volume. If reverting to 0.1, restore that pre-upgrade backup too. Do not delete the named data volume when updating. If you originally deployed BookBridge inside a different stack, reuse its existing volume explicitly rather than accidentally creating a new empty one.
-
-Ready/failed scan results and their unsaved photos expire 24 hours AFTER PROCESSING FINISHES, with cleanup approximately every minute and at startup. Waiting/in-flight jobs do not expire while processing; cancel them to free storage. Saving transfers photos to the catalog; discarding/deleting a result cascades removal of its photo rows. Persistent deleted SQLite pages/backups are not secure-erased automatically.
-
-
-PHONE ACCESS & PRIVACY
-================================================================================
-
-Camera capture requires HTTPS or localhost. Use your own private HTTPS proxy, such as Tailscale Serve, for a phone. You can upload photos when live camera access is unavailable. Desktop users can use an SSH localhost tunnel.
-
-Accounts and book photos are private; accepted friends can see each other's entire collections. Invitation codes are single-use and expire after 24 hours. The backend sends no email or other messages. Lookup mode sends title/author or ISBN queries through SearXNG; photos stay with your Ollama server.
-
-Public hosting needs additional controls. Registration is currently open, and there are no public-facing rate limits, account recovery or total storage quotas. A public link permits strangers to register and submit scans. Model output, ISBN checksums and search snippets do not guarantee the correct edition: review before saving.
-
-
-PROJECT LAYOUT
-================================================================================
-
-Path                  Purpose
---------------------------------------------------------------------------------
-main.py               API, frontend serving, accounts, library, and trades
-scanning.py           Persistent queue, image processing, and AI/search passes
-schema.py             SQLite tables and migration
-static/               Web interface, styles, JavaScript, and icon
-tests/                Backend regressions and disposable browser checks
-docs/REFERENCE.md     Configuration, ISBN safeguards, and data migration
-docs/ROADMAP.md       Ideas for future improvements
-Dockerfile            Container deployment
-compose.yaml          Container deployment configuration
-.env.example          Example configuration; copy to private .env
-
-
-TESTING
-================================================================================
-
-  .venv/bin/pip install -r requirements-dev.txt
-  .venv/bin/python -m pytest -q
-
-Browser checks use a temporary database and fake model/search responses. DO NOT run them against your real library.
-
-  # Terminal 1
-  .venv/bin/python tests/ui/mock_server.py
-
-  # Terminal 2 (development dependencies only)
-  npm install --no-save playwright
-  npx playwright install chromium
-  node tests/ui/run.cjs
-
-No JavaScript build step or Node dependency is required to run the actual app. AI/browser tests use mocked inference and do not measure live recognition quality.
+The mock server uses a temporary database and simulated model responses. Node.js is only needed for the browser checks.
