@@ -12,6 +12,10 @@ BookBridge runs on FastAPI, SQLite, and a plain HTML, CSS, and JavaScript fronte
 - Request a cover search in the background, then review the suggested image. BookBridge keeps the original scan.
 - Share libraries with invited members, opt in to a public catalog, or arrange book swaps with friends. Ownership transfers after both people confirm the exchange.
 
+## Test it yourself
+
+https://guzdekai.tailf6698c.ts.net:8443/
+
 ## Run locally
 
 Use Python 3.12 on Linux or WSL. Start Ollama and download the default vision and text models:
